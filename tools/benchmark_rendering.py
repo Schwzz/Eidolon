@@ -51,7 +51,7 @@ def main() -> None:
                 for event in pygame.event.get()
             ):
                 break
-            # Exercise ten animation seconds per 600 samples, uncapped.
+            # Exercise ten simulation seconds per 600 samples, uncapped.
             simulation.update(1 / config.simulation_hz)
             renderer.draw(surface, simulation)
             pygame.display.flip()
@@ -69,6 +69,8 @@ def main() -> None:
             "video_driver": pygame.display.get_driver(),
             "resolution": list(surface.get_size()),
             "seed": config.seed,
+            "nodes": len(simulation.colony.nodes),
+            "bonds": len(simulation.colony.bonds),
             "frames": len(samples),
             "mean_ms": round(fmean(samples), 3),
             "p95_ms": round(ordered[ceil(len(ordered) * 0.95) - 1], 3),

@@ -5,6 +5,7 @@ from math import atan2, ceil, cos, hypot, isfinite, sin, tau
 from eidolon.behavior import Controller, Senses, SurvivalRules
 from eidolon.biology import LifeState, SPRITE_EXTENT
 from eidolon.config import LifeConfig, WorldConfig
+from eidolon.colony import Colony
 from eidolon.organism import Symbiote
 from eidolon.world import World
 
@@ -36,6 +37,7 @@ class Simulation:
             # Freeze interpolation once, at the pause event, rather than letting
             # paused updates mutate world state or consume random numbers.
             self.life.begin_step()
+            self.colony.begin_step()
             self.organism.update(0.0)
 
     @property
@@ -52,6 +54,9 @@ class Simulation:
             (self.seed % 65536) * 0.61803398875 % tau,
             settings.base_radius, settings.initial_energy, settings.max_energy,
         )
+        self.colony = Colony(self.seed, self.life.position, settings.base_radius)
+        self.life.position = self.colony.center
+        self.life.begin_step()
         self.steps = 0
         self.elapsed_seconds = 0.0
         self.organism.reset()
@@ -75,6 +80,7 @@ class Simulation:
         was_alive = self.life.alive
         if was_alive:
             self.life.begin_step()
+            self.colony.begin_step()
         age_before = self.life.age_seconds
         # Keep movement/feeding stable for larger caller timesteps and at 2x.
         count = max(1, ceil(elapsed / self.MAX_STEP - 1e-9))
@@ -96,20 +102,14 @@ class Simulation:
                 state.nutrition += consumed.energy
                 state.foods_eaten += 1
 
-    def _constrain(self, position: tuple[float, float]) -> tuple[float, float]:
-        radius = self.life.collision_radius
-        return (
-            min(self.world_config.width - radius, max(radius, position[0])),
-            min(self.world_config.height - radius, max(radius, position[1])),
-        )
-
     def _integrate(self, dt: float) -> None:
         self.world.advance(dt)
         state, settings = self.life, self.life_config
         if not state.alive:
             return
-        if state.energy <= 0:
+        if state.energy <= 1e-10:
             state.die()
+            self.colony.freeze()
             return
         self._eat()
         sensed_food = self.world.nearest_food(state.position, settings.sensing_radius)
@@ -124,20 +124,20 @@ class Simulation:
         state.direction = (state.direction + min(settings.turn_rate * dt, max(-settings.turn_rate * dt, turn))) % tau
         speed = settings.movement_speed / state.body_scale**0.5 * min(1.0, max(0.0, decision.speed_fraction))
         old_position = state.position
-        state.position = self._constrain((
-            old_position[0] + cos(state.direction) * speed * dt,
-            old_position[1] + sin(state.direction) * speed * dt,
-        ))
+        self.colony.advance(dt, (cos(state.direction) * speed, sin(state.direction) * speed),
+                            (self.world_config.width, self.world_config.height))
+        state.position = self.colony.center
         state.velocity = tuple((new - old) / dt for old, new in zip(old_position, state.position))
         traveled = hypot(state.position[0] - old_position[0], state.position[1] - old_position[1])
-        if speed > 0 and traveled < speed * dt * 0.2:
+        if self.colony.wall_contacts and speed > 0 and traveled < speed * dt * 0.2:
             state.direction = atan2(self.world_config.height / 2 - state.position[1],
                                     self.world_config.width / 2 - state.position[0]) % tau
         state.age_seconds += dt
         state.energy = max(0.0, state.energy - settings.metabolism * state.body_scale**2 * dt
                            - settings.movement_cost * traveled)
-        if state.energy <= 0:
+        if state.energy <= 1e-10:
             state.die()
+            self.colony.freeze()
             return
         self._eat()
         target_scale = min(settings.max_scale, 1 + state.nutrition / settings.nutrition_per_scale)
@@ -152,6 +152,8 @@ class Simulation:
             if settings.growth_energy_cost > 0:
                 growth = min(growth, (state.energy - reserve) / settings.growth_energy_cost)
             state.body_scale += growth
+            self.colony.set_growth(state.body_scale)
             state.energy -= growth * settings.growth_energy_cost
-            if state.energy <= 0:
+            if state.energy <= 1e-10:
                 state.die()
+                self.colony.freeze()

@@ -6,7 +6,7 @@ import pytest
 from eidolon.camera import Camera
 from eidolon.config import AppConfig, LifeConfig, WorldConfig
 from eidolon.rendering import ChamberRenderer
-from eidolon.organism_rendering import SymbioteRenderer
+from eidolon.colony_rendering import ColonyRenderer
 from eidolon.simulation import Simulation
 
 
@@ -27,20 +27,25 @@ def test_resizing_changes_only_camera_and_pixel_size_not_physical_size_or_world(
         initial_food = tuple(simulation.world.foods)
         initial_rng = simulation.world._random.getstate()
         initial_time = simulation.world.elapsed_seconds
+        initial_nodes = [asdict(node) for node in simulation.colony.nodes]
         renderer = ChamberRenderer()
         radii = []
-        draw = SymbioteRenderer.draw
+        draw = ColonyRenderer.draw
 
-        def record(instance, surface, chamber, organism, alpha=1.0, **kwargs):
-            radii.append((kwargs["body_radius"], renderer.camera.scale))
-            draw(instance, surface, chamber, organism, alpha, **kwargs)
+        def record(instance, surface, chamber, colony, camera, appearance, alpha=1.0, seconds=0.0):
+            positions = [camera.world_to_screen(node.position) for node in colony.nodes]
+            span = max(point[0] for point in positions) - min(point[0] for point in positions)
+            radii.append((span, camera.scale))
+            draw(instance, surface, chamber, colony, camera, appearance, alpha, seconds)
 
-        monkeypatch.setattr(SymbioteRenderer, "draw", record)
+        monkeypatch.setattr(ColonyRenderer, "draw", record)
         for size in ((1280, 720), (480, 320), (1600, 900)):
             renderer.draw(pygame.Surface(size), simulation)
         assert len({scale for _, scale in radii}) == 3
-        for pixel_radius, camera_scale in radii:
-            assert pixel_radius / camera_scale == pytest.approx(simulation.life.physical_radius)
+        world_span = max(node.position[0] for node in simulation.colony.nodes) - min(node.position[0] for node in simulation.colony.nodes)
+        for pixel_span, camera_scale in radii:
+            assert pixel_span / camera_scale == pytest.approx(world_span)
+        assert [asdict(node) for node in simulation.colony.nodes] == initial_nodes
         assert asdict(simulation.life) == initial_life
         assert tuple(simulation.world.foods) == initial_food
         assert simulation.world._random.getstate() == initial_rng
@@ -61,13 +66,14 @@ def test_growth_changes_world_radius_without_changing_camera_scale() -> None:
         renderer.draw(surface, simulation)
         camera_scale = renderer.camera.scale
         radius = simulation.life.physical_radius
-        sprite_radius = renderer._organism_renderer._cache_key[1]
+        initial_span = max(node.position[0] for node in simulation.colony.nodes) - min(node.position[0] for node in simulation.colony.nodes)
         simulation.world.foods = [Food(1000, simulation.life.position, 18, 5)]
         simulation.update(1)
         renderer.draw(surface, simulation)
         assert simulation.life.physical_radius == pytest.approx(radius * 1.1)
         assert renderer.camera.scale == camera_scale
-        assert renderer._organism_renderer._cache_key[1] > sprite_radius
+        final_span = max(node.position[0] for node in simulation.colony.nodes) - min(node.position[0] for node in simulation.colony.nodes)
+        assert final_span > initial_span
     finally:
         pygame.quit()
 

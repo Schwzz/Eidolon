@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from math import atan2, cos, hypot, sin
 
 
-# Conservative disk containing the placeholder body and all animated appendages.
+# Conservative clearance for steering, spawning, and growth. Actual contacts are
+# solved per biomass node by Colony.
 SPRITE_EXTENT = 6.0
 
 

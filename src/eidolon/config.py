@@ -35,7 +35,7 @@ class WorldConfig:
 
 @dataclass(frozen=True, slots=True)
 class LifeConfig:
-    base_radius: float = 24.0  # Nominal sprite radius in world units.
+    base_radius: float = 24.0  # Nominal colony size/spacing in world units.
     max_scale: float = 1.6
     initial_energy: float = 70.0
     max_energy: float = 100.0

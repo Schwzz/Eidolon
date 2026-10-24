@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eidolon"
-version = "0.3.0"
-description = "An experimental artificial-life desktop sandbox — environment and basic life."
+version = "0.4.0"
+description = "An experimental artificial-life desktop sandbox — living biomass colony."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

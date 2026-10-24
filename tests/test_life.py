@@ -7,6 +7,7 @@ from eidolon.behavior import Decision
 from eidolon.config import LifeConfig, WorldConfig
 from eidolon.simulation import Simulation
 from eidolon.world import Food
+from eidolon.colony import MEMBRANE_RADIUS
 
 
 EMPTY = WorldConfig(initial_food=0, food_capacity=0, regeneration_interval=0)
@@ -36,6 +37,8 @@ def snapshot(simulation):
         simulation.world.regeneration_elapsed, simulation.world._random.getstate(),
         simulation.world._next_id, simulation.organism.age_seconds,
         simulation.organism.previous_age_seconds,
+        tuple(asdict(node) for node in simulation.colony.nodes),
+        tuple(simulation.colony.bonds), simulation.colony.elapsed_seconds,
     )
 
 
@@ -47,10 +50,11 @@ def test_movement_velocity_age_and_energy_cost_use_world_units() -> None:
     state.direction = 0
     start = state.position
     simulation.update(0.1)
-    assert state.position == pytest.approx((start[0] + 5.5, start[1]))
-    assert state.velocity == pytest.approx((55, 0))
-    assert state.speed == pytest.approx(55)
-    assert state.energy == pytest.approx(70 - 0.1 - 5.5 * 0.025)
+    assert state.position[0] > start[0]
+    assert 0 < state.speed < config.movement_speed  # Finite force-driven acceleration.
+    assert state.position == simulation.colony.center
+    traveled = hypot(state.position[0] - start[0], state.position[1] - start[1])
+    assert state.energy == pytest.approx(70 - 0.1 - traveled * 0.025, abs=1e-5)
     assert state.age_seconds == pytest.approx(0.1)
     assert state.health == pytest.approx(state.energy)
 
@@ -61,8 +65,8 @@ def test_stationary_organism_pays_metabolism_but_no_movement_cost() -> None:
     initial_position = simulation.life.position
     simulation.update(1)
     assert simulation.life.energy == pytest.approx(68)
-    assert simulation.life.position == initial_position
-    assert simulation.life.velocity == (0, 0)
+    assert simulation.life.position == pytest.approx(initial_position)
+    assert simulation.life.velocity == pytest.approx((0, 0), abs=1e-8)
 
 
 def test_rules_wander_when_no_food_is_visible() -> None:
@@ -151,9 +155,11 @@ def test_growth_is_capped_and_waits_for_room_at_a_boundary() -> None:
     simulation.life.energy = 100
     simulation.life.nutrition = 1000
     simulation.life.position = (simulation.life.collision_radius, simulation.life.position[1])
+    simulation.colony.translate_to(simulation.life.position)
     simulation.update(1)
     assert simulation.life.body_scale == pytest.approx(1)
     simulation.life.position = (600, 400)
+    simulation.colony.translate_to(simulation.life.position)
     simulation.update(10)
     assert simulation.life.body_scale == config.max_scale
     assert simulation.life.physical_radius == config.base_radius * config.max_scale
@@ -199,12 +205,14 @@ def test_whole_organism_remains_within_world_boundaries(direction) -> None:
         800 - radius - 0.01 if direction == pi / 2 else radius + 0.01 if direction == 3 * pi / 2 else 400,
     )
     simulation.life.direction = direction
+    simulation.colony.translate_to(simulation.life.position)
     for _ in range(300):
         simulation.update(1 / 60)
-        x, y = simulation.life.position
-        radius = simulation.life.collision_radius
-        assert radius <= x <= 1200 - radius
-        assert radius <= y <= 800 - radius
+        for node in simulation.colony.nodes:
+            x, y = node.position
+            radius = node.radius * MEMBRANE_RADIUS
+            assert radius <= x <= 1200 - radius
+            assert radius <= y <= 800 - radius
 
 
 def test_pause_freezes_complete_world_biology_animation_and_random_state() -> None:

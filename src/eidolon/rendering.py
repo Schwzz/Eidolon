@@ -2,7 +2,7 @@
 
 import pygame
 
-from eidolon.organism_rendering import SymbioteRenderer
+from eidolon.colony_rendering import ColonyRenderer
 from eidolon.camera import Camera
 from eidolon.simulation import Simulation
 
@@ -20,7 +20,7 @@ class ChamberRenderer:
         self._title_font = pygame.font.Font(None, 32)
         self._title = self._title_font.render("EIDOLON", True, self.TEXT)
         self._label_font = pygame.font.Font(None, 20)
-        self._organism_renderer = SymbioteRenderer()
+        self._colony_renderer = ColonyRenderer()
         self._labels: dict[tuple[str, tuple[int, int, int]], pygame.Surface] = {}
         self.camera: Camera | None = None
 
@@ -43,7 +43,7 @@ class ChamberRenderer:
         surface.blit(
             self._label("SIMULATION CHAMBER", self.MUTED), (24, 50)
         )
-        phase = self._label("PHASE 1B", self.ACCENT)
+        phase = self._label("PHASE 1C-A", self.ACCENT)
         surface.blit(phase, (width - phase.get_width() - 24, 29))
 
         chamber = pygame.Rect(24, 82, max(1, width - 48), max(1, height - 128))
@@ -63,12 +63,9 @@ class ChamberRenderer:
                 pygame.draw.circle(surface, (36, 53, 39), position, radius + 2)
                 pygame.draw.circle(surface, (161, 191, 119), position, radius)
             interpolation = 1.0 if simulation.paused or not simulation.life.alive else alpha
-            life_pose = simulation.life.sample(interpolation)
-            self._organism_renderer.draw(
-                surface, world_rect, simulation.organism, interpolation,
-                center=camera.world_to_screen(life_pose.position),
-                body_radius=simulation.life.base_radius * life_pose.scale * camera.scale,
-                heading=life_pose.direction,
+            self._colony_renderer.draw(
+                surface, world_rect, simulation.colony, camera,
+                simulation.organism.appearance, interpolation, simulation.organism.age_seconds,
             )
             life = simulation.life
             energy = f"ENERGY {life.energy:.0f}/{life.max_energy:.0f}   AGE {life.age_seconds:.0f}s"

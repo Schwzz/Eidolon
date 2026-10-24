@@ -25,6 +25,8 @@ def test_simulation_rate_is_independent_of_render_rate(render_fps) -> None:
         reference.update(1 / 60)
     assert simulation.life == reference.life
     assert simulation.world.foods == reference.world.foods
+    assert simulation.colony.sample() == reference.colony.sample()
+    assert [node.velocity for node in simulation.colony.nodes] == [node.velocity for node in reference.colony.nodes]
 
 
 def test_retains_fractional_time_between_frames() -> None:
