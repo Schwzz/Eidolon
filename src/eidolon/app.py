@@ -15,6 +15,19 @@ class Application:
         self.config = config if config is not None else AppConfig()
         self.simulation = Simulation(self.config.seed, self.config.world, self.config.life)
 
+    def _pointer_event(self, event, size: tuple[int, int]) -> None:
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self.simulation.release_grab()
+        elif ((event.type == pygame.MOUSEBUTTONDOWN and event.button == 1)
+              or (event.type == pygame.MOUSEMOTION and self.simulation.colony.grab is not None)):
+            world = self.simulation.world_config
+            camera = ChamberRenderer.camera_for_window(size, (world.width, world.height))
+            position = camera.screen_to_world(event.pos)
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                self.simulation.begin_grab(position, padding=8 / camera.scale)
+            else:
+                self.simulation.move_grab(position)
+
     def run(self) -> None:
         """Run until the window closes or Escape is pressed; always release SDL."""
         try:
@@ -51,6 +64,7 @@ class Application:
                                 min(2.0, self.simulation.speed + 0.25)
                             )
                     elif event.type == pygame.VIDEORESIZE:
+                        self.simulation.release_grab()
                         surface = pygame.display.set_mode(
                             (
                                 max(MIN_WINDOW_WIDTH, event.w),
@@ -58,6 +72,10 @@ class Application:
                             ),
                             pygame.RESIZABLE,
                         )
+                    elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION):
+                        self._pointer_event(event, surface.get_size())
+                    elif event.type in (pygame.WINDOWFOCUSLOST, pygame.WINDOWLEAVE):
+                        self.simulation.release_grab()
                 if not running:
                     break
 
@@ -68,4 +86,5 @@ class Application:
                 pygame.display.flip()
                 frame_limiter.tick(self.config.max_fps)
         finally:
+            self.simulation.release_grab()
             pygame.quit()

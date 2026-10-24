@@ -53,3 +53,23 @@ def test_renderer_restores_clip_and_stays_inside_viewport() -> None:
     ColonyRenderer().draw(surface, viewport, colony, camera, generate_appearance(17))
     assert surface.get_clip() == clip
     assert surface.get_at((50, 50)).a == 0
+
+
+def test_detached_fragment_is_visible_without_a_ghost_membrane_bridge() -> None:
+    colony = Colony(17, (400, 300), 24)
+    node = max(colony.nodes, key=lambda candidate: candidate.position[0])
+    colony.bonds = [bond for bond in colony.bonds if node.identifier not in (bond.first, bond.second)]
+    colony.rebuild_topology()
+    node.position = (700, 300)
+    colony.begin_step()
+    initial = [asdict(node) for node in colony.nodes]
+    surface = pygame.Surface((800, 600), pygame.SRCALPHA)
+    camera = Camera.fit((800, 600), (0, 0, 800, 600))
+    renderer = ColonyRenderer()
+    renderer.draw(surface, surface.get_rect(), colony, camera, generate_appearance(17))
+    components = pygame.mask.from_surface(surface, threshold=40).get_bounding_rects()
+    assert len([rect for rect in components if rect.width * rect.height > 16]) == 2
+    assert surface.get_at((700, 300)).a > 40
+    assert surface.get_at((560, 300)).a == 0
+    assert [asdict(node) for node in colony.nodes] == initial
+    assert len(renderer._buffers) <= 8

@@ -32,6 +32,11 @@ class ChamberRenderer:
             self._labels[key] = self._label_font.render(text, True, color)
         return self._labels[key]
 
+    @staticmethod
+    def camera_for_window(size: tuple[int, int], world_size: tuple[float, float]) -> Camera:
+        width, height = size
+        return Camera.fit(world_size, (34, 92, width - 68, height - 196))
+
     def draw(
         self, surface: pygame.Surface, simulation: Simulation | None = None,
         alpha: float = 1.0,
@@ -43,7 +48,7 @@ class ChamberRenderer:
         surface.blit(
             self._label("SIMULATION CHAMBER", self.MUTED), (24, 50)
         )
-        phase = self._label("PHASE 1C-A", self.ACCENT)
+        phase = self._label("PHASE 1C-B", self.ACCENT)
         surface.blit(phase, (width - phase.get_width() - 24, 29))
 
         chamber = pygame.Rect(24, 82, max(1, width - 48), max(1, height - 128))
@@ -52,8 +57,7 @@ class ChamberRenderer:
 
         if simulation is not None:
             world = simulation.world.config
-            viewport = (chamber.left + 10, chamber.top + 10, chamber.width - 20, chamber.height - 68)
-            self.camera = Camera.fit((world.width, world.height), viewport)
+            self.camera = self.camera_for_window(surface.get_size(), (world.width, world.height))
             camera = self.camera
             world_rect = pygame.Rect(*camera.offset, world.width * camera.scale, world.height * camera.scale)
             pygame.draw.rect(surface, (30, 44, 48), world_rect, width=1)
@@ -77,7 +81,7 @@ class ChamberRenderer:
             speed = f"{'PAUSED' if simulation.paused else 'RUNNING'} {simulation.speed:.2f}x"
             speed_label = self._label(speed, self.ACCENT)
             surface.blit(speed_label, (width - speed_label.get_width() - 40, height - 68))
-            controls = "SPACE Pause   R Restart   -/+ Speed"
+            controls = "LMB Grab  SPACE Pause  R Reset  +/-"
         else:
             controls = "EMPTY CHAMBER"
         surface.blit(self._label(controls, self.MUTED), (24, height - 29))

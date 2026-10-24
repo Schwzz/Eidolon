@@ -37,6 +37,7 @@ class Simulation:
             # Freeze interpolation once, at the pause event, rather than letting
             # paused updates mutate world state or consume random numbers.
             self.life.begin_step()
+            self.colony.release_grab()
             self.colony.begin_step()
             self.organism.update(0.0)
 
@@ -69,6 +70,31 @@ class Simulation:
     def set_animation_speed(self, speed: float) -> None:
         """Compatibility entry point; speed now scales the complete simulation."""
         self.set_speed(speed)
+
+    def begin_grab(self, position: tuple[float, float], padding: float = 0.0) -> int | None:
+        if self.paused or not self.life.alive:
+            self.release_grab()
+            return None
+        if not all(isfinite(value) for value in position):
+            raise ValueError("pointer coordinates must be finite")
+        if not (0 <= position[0] <= self.world_config.width and 0 <= position[1] <= self.world_config.height):
+            self.release_grab()
+            return None
+        return self.colony.begin_grab(position, padding)
+
+    def move_grab(self, position: tuple[float, float]) -> None:
+        if not self.life.alive:
+            self.release_grab()
+            return
+        if self.paused:
+            return
+        if not all(isfinite(value) for value in position):
+            raise ValueError("pointer coordinates must be finite")
+        self.colony.move_grab((min(self.world_config.width, max(0.0, position[0])),
+                               min(self.world_config.height, max(0.0, position[1]))))
+
+    def release_grab(self) -> None:
+        self.colony.release_grab()
 
     def update(self, dt: float) -> None:
         if not isfinite(dt) or dt <= 0:
@@ -106,6 +132,7 @@ class Simulation:
         self.world.advance(dt)
         state, settings = self.life, self.life_config
         if not state.alive:
+            self.colony.freeze()
             return
         if state.energy <= 1e-10:
             state.die()
@@ -123,12 +150,13 @@ class Simulation:
         turn = atan2(sin(decision.direction - state.direction), cos(decision.direction - state.direction))
         state.direction = (state.direction + min(settings.turn_rate * dt, max(-settings.turn_rate * dt, turn))) % tau
         speed = settings.movement_speed / state.body_scale**0.5 * min(1.0, max(0.0, decision.speed_fraction))
-        old_position = state.position
-        self.colony.advance(dt, (cos(state.direction) * speed, sin(state.direction) * speed),
-                            (self.world_config.width, self.world_config.height))
+        displacement = self.colony.advance(dt, (cos(state.direction) * speed, sin(state.direction) * speed),
+                                           (self.world_config.width, self.world_config.height))
         state.position = self.colony.center
-        state.velocity = tuple((new - old) / dt for old, new in zip(old_position, state.position))
-        traveled = hypot(state.position[0] - old_position[0], state.position[1] - old_position[1])
+        state.velocity = tuple(value / dt for value in displacement)
+        # Membership changes can move a centroid without moving any material.
+        # Charge actual primary-component motion, not that bookkeeping jump.
+        traveled = hypot(*displacement)
         if self.colony.wall_contacts and speed > 0 and traveled < speed * dt * 0.2:
             state.direction = atan2(self.world_config.height / 2 - state.position[1],
                                     self.world_config.width / 2 - state.position[0]) % tau
