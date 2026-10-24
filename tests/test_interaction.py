@@ -13,7 +13,8 @@ from eidolon.timing import FixedStepClock
 def state(colony):
     return (tuple(asdict(node) for node in colony.nodes), tuple(colony.bonds), colony.components,
             asdict(colony.grab) if colony.grab else None, colony.elapsed_seconds,
-            colony.broken_bonds, colony.reconnected_bonds, dict(colony._tension), dict(colony._cooldown))
+            colony.broken_bonds, colony.reconnected_bonds, dict(colony._tension), dict(colony._cooldown),
+            tuple(sorted(colony._scars)), colony._next_break, colony._next_reconnect)
 
 
 def start_pull(colony):
@@ -136,10 +137,11 @@ def test_connected_components_and_triangles_follow_graph_edits() -> None:
 
 def test_multinode_fragment_moves_toward_and_reconnects_with_largest_component() -> None:
     colony = Colony(17, (600, 400), 24)
-    smaller = set(sorted(range(len(colony.nodes)), key=lambda index: colony.nodes[index].position[0])[:11])
+    fragment_count = len(colony.nodes) // 2 - 1
+    smaller = set(sorted(range(len(colony.nodes)), key=lambda index: colony.nodes[index].position[0])[:fragment_count])
     colony.bonds = [bond for bond in colony.bonds if (bond.first in smaller) == (bond.second in smaller)]
     colony.rebuild_topology()
-    assert tuple(map(len, colony.components)) == (12, 11)
+    assert tuple(map(len, colony.components)) == (len(colony.nodes) - fragment_count, fragment_count)
     for identifier in smaller:
         node = colony.nodes[identifier]
         node.position = (node.position[0] - 200, node.position[1])

@@ -1,10 +1,11 @@
 # EIDOLON
 
-An experimental artificial-life sandbox for Windows desktop. **Phase 1C-B:
-Physical Interaction** adds grabbing, elastic pulling, local tearing, and fragment
-recovery to the flexible colony of **23–26 biomass nodes**. The flat membrane
-appearance, autonomous foraging, food, energy, growth, starvation, and fixed world
-remain.
+An experimental artificial-life sandbox for Windows desktop. **Phase 1C-C:
+Microscopic Biomass & Reliable Reconnection** uses **85–98 smaller physics nodes**,
+a continuous flat membrane, and **340–392 tiny render-only material grains**
+(previously 23–26 large physics nodes).
+Grabbing, local tearing, autonomous foraging, food, energy, growth, starvation,
+and the fixed world remain.
 
 There are no neural networks, learning, evolution, reproduction, or multiple
 organisms. No cloud APIs, credentials, or network connection are required after
@@ -63,9 +64,13 @@ state. Floating-point/raster results may differ across Python or platform versio
 
 `colony.py` owns particle positions/velocities/masses/radii, stable node IDs,
 adjacency, local triangles, and a separate list of elastic bonds. A seeded,
-lopsided staggered mesh supplies 23–26 nodes and approximately 100–140 bonds.
-Neighbor bonds preserve local tissue; more compliant longer bonds resist bulk
-collapse without imposing a rigid pose. Adjacency, membrane faces, and connected
+lopsided staggered mesh supplies 85–98 nodes and roughly 220–255 local bonds.
+At the default size, core node radii are **3.3–3.7 world units**, previously about
+8; neighboring centers are 9 units apart. The overall body remains a similar size.
+Layouts with 62, 88, 98, and 108 nodes were compared during development; the
+85–98 range balances local deformation and CPU cost. Neighbor bonds preserve
+local tissue without long supports that resist pulling the entire body.
+Adjacency, membrane faces, and connected
 components are rebuilt only when bonds change. Nodes retain stable IDs throughout
 tearing and reconnection; no fragments become independent organisms.
 
@@ -74,10 +79,14 @@ The solver uses velocity prediction followed by **XPBD-style distance constraint
 - Physics substeps are at most **1/120 second**, with five constraint iterations.
 - Compliance is scaled by timestep squared; inverse mass weights the corrections.
 - Relative-velocity damping limits jitter and angular drift.
+- A deterministic spatial grid finds local collision candidates instead of
+  comparing every node pair during every solver iteration. It is rebuilt after
+  constraint corrections, including during growth and interaction.
 - Node separation and wall projection prevent collapse and keep the membrane in
   the world. Overlapping visual membranes represent one connected tissue mass.
 - A hard extension limit and a velocity cap protect against unusually strong
-  impulses. Nonfinite input/state raises an error rather than silently reseeding.
+  impulses. Locomotion eases near walls to avoid packing tissue into a corner.
+  Nonfinite input/state raises an error rather than silently reseeding.
 
 The rule controller requests a movement direction/speed. This becomes traction
 on individual particles, stronger at the leading edge. Neighboring particles
@@ -98,18 +107,27 @@ count remains constant. Death freezes all nodes and stops decisions/feeding.
 preserves the initial click offset and applies force during physics substeps;
 it never teleports a node. Force is capped at **14,000 × growth scale**, while
 the existing **220 × √scale** velocity cap and membrane-aware walls still apply.
-Locomotion relaxes while the main component is held, allowing gentle stretching.
+Controller braking is disabled on a held component, allowing the spring to pull
+material gradually instead of fighting the entire colony's locomotion forces.
 
 Only bonds incident to the held node can tear. Both sustained strong pulling
-(at least **6,000 × scale** force) and **3.5% tensile strain for 0.12 simulation
+(at least **1,800 × scale** force) and **18% tensile strain for 0.12 simulation
 seconds** are required. At most one bond breaks every 0.05 seconds. Brief pointer
 jumps and ordinary locomotion do not cause uncontrolled cascades.
 
 Unheld fragments seek the nearest part of the largest component. The main
-component slows while fragments recover. Reconnection waits for close, reasonably
-slow contact and a 0.7-second tear cooldown, then adds a compliant bridge at the
-current separation to avoid snapping. Held fragments remain under the pointer's
-constraint until released. Recovery is deterministic and uses no extra randomness.
+component slows while fragments recover. Contact capture reaches 1.65 node
+spacings and uses velocity damping instead of rejecting fast contact. Healing
+waits for pointer release and a **0.45-second simulation-time tear cooldown**.
+It adds multiple local bonds where neighbors are available, with at most eight
+new bonds per repair pass and eight neighbors per node. Capture starts at the
+actual gap, then smoothly relaxes toward normal spacing; no node is teleported.
+
+Repair continues after the graph becomes connected. Weak attachments search up
+to two spacings to find additional support, preventing the old single-bridge
+failure. New bonds have a grace period before they can tear again. Held
+fragments remain under the pointer constraint until release. Recovery is
+deterministic and uses no extra randomness.
 
 Fragments share the original colony's energy, growth, and survival state.
 Sensing/feeding use the largest component's centroid. Reconnection restores
@@ -166,19 +184,22 @@ Feeding and energy remain colony-wide systems in this prototype.
 
 ## Flat membrane rendering
 
-`colony_rendering.py` draws the physical mesh as local filled triangles, rounded
-bond connections, and overlapping node discs. Reusable local surfaces are drawn
-at 2× resolution and downsampled for a soft outline. Flat pigment patches and a
-few faint material lights preserve the seeded palette. There is no circular cell
-rim, analytic squid body, rigid spike silhouette, or 3D lighting model.
+`colony_rendering.py` blends cached, smooth density stamps and intact local tissue
+into one coverage mask per connected component. Nodes are not displayed as large
+circles. A smooth coverage threshold and 2× downsampling soften the membrane;
+flat seeded pigment, four tiny material grains per node, and one restrained
+internal core supply texture. The grains are anchored to tissue and have no
+independent physics, decisions, or lifetime. There is no 3D lighting model.
 
 Rendering never integrates or repositions nodes. It only interpolates stored world
 coordinates and applies the camera. The old appearance helpers remain available
 for compatibility/tests, but the application's active body renderer uses only
 the colony mesh. The appearance generator supplies its colors. Each connected
 component gets a local buffer so detached tissue remains visible; missing bonds
-also remove their membrane faces. Buffer sizes adapt to actual extents and the
-cache holds at most eight sizes. The intact colony's visual style is unchanged.
+also remove their membrane faces. Separated components never share a density
+field; after reconnection, their tissue blends in one field without an artificial
+seam. Buffer sizes adapt to actual extents and the cache holds at most eight
+sizes. The terrarium and UI layout are unchanged.
 
 ## Performance and tests
 
@@ -193,12 +214,25 @@ light stamps are reused, and HUD label caching remains bounded.
 .\.venv\Scripts\python.exe -m pip check
 .\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600
 .\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --interaction
+.\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --interaction --scale 1.6
+.\.venv\Scripts\python.exe tools\stress_colony.py --seed 17 --cycles 6 --scale 1.6
 ```
 
 The benchmark measures uncapped physics/update/draw/presentation and reports node
 and bond counts. `--interaction` includes scripted pulling, tearing, and recovery,
-and reports component and bond-change counts. `--headless` selects SDL's dummy driver for cloud runs; it does
+and reports component and bond-change counts. `--scale 1.6` exercises maximum
+growth after warmup. `--headless` selects SDL's dummy driver for cloud runs; it does
 not measure native Windows presentation or guarantee performance on target hardware.
+The display-free stress tool checks repeated tearing/recovery, identity and mass
+conservation, bond accounting, neighbor limits, walls, and finite/capped velocities.
+
+Phase 1C-C cloud validation: **224 tests passed on Python 3.12 and 3.14**.
+Across seeds 0, 17, and 42, nine 600-frame Linux / Python 3.14.8 / SDL dummy
+runs at 1280 × 720 (normal motion, interaction, and maximum-growth interaction)
+averaged **4.76–6.50 ms/frame**, with p95 at most **7.97 ms**. Stress checks
+completed **27 recovery cycles over 553.5 simulation seconds**, including 1.6×
+growth, without lost nodes or limit violations. These are cloud measurements,
+not native Windows or Iris Xe verification.
 
 Tests cover seeded connected graphs, force propagation, stretch/recovery,
 self-collision, walls, timestep subdivision, growth, deterministic trajectories,
@@ -208,6 +242,9 @@ world state. Interaction tests cover picking, click offsets, capped forces,
 gentle versus sustained pulls, local breakage, graph updates, fragment recovery,
 reconnection, deterministic pointer replay, and lifecycle cancellation. Repeated
 tear/recover cycles check bounded positions/velocities and retained node counts.
+Recovery regressions include fast close contact, multiple attachments, continued
+repair after first capture, cooldowns, and dense growth. A spatial-grid test checks
+candidate completeness against exact distances across cell boundaries.
 Earlier relevant lifecycle, resource, energy, pause/reset, and
 fixed-step tests remain; former rigid-movement assertions now check force-driven
 acceleration and actual travel. Legacy appearance helpers retain their unit tests.
@@ -217,6 +254,8 @@ establish that it has run. Native Windows graphical compatibility and Iris Xe
 performance require a Windows check: watch the colony forage and deform, resize,
 try gentle and forceful pulls followed by release, pause/restart/speed, and exit
 with Escape and the window close button.
+**Appearance acceptance requires manual Windows review; automated masks and
+Linux previews do not establish visual approval.**
 
 ## Architecture
 
@@ -229,6 +268,7 @@ src/eidolon/
   simulation.py        World/biology/behavior/physics coordination
   colony.py            Nodes, bonds, constraints, damping, and collisions
   interaction.py       Force-limited pointer constraint, without display dependencies
+  spatial.py           Deterministic local neighbor grid
   colony_rendering.py  Flat membrane from physical node positions
   biology.py           Colony-wide biological state
   behavior.py          Replaceable sensory/decision interface and survival rules
@@ -237,7 +277,7 @@ src/eidolon/
   rendering.py         Terrarium, resources, and HUD
   organism*.py         Seeded palette and legacy appearance helpers
 tests/                 Physics, biology, rendering, and lifecycle tests
-tools/                 Optional performance benchmark
+tools/                 Optional rendering benchmark and physics stress checks
 ```
 
 Simulation and physics run without Pygame, NumPy, or a display. In Linux/cloud

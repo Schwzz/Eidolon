@@ -73,3 +73,19 @@ def test_detached_fragment_is_visible_without_a_ghost_membrane_bridge() -> None:
     assert surface.get_at((560, 300)).a == 0
     assert [asdict(node) for node in colony.nodes] == initial
     assert len(renderer._buffers) <= 8
+
+
+def test_microscopic_grains_are_render_only_and_glow_is_composited_into_tissue() -> None:
+    colony = Colony(17, (400, 300), 24)
+    appearance = generate_appearance(17)
+    renderer = ColonyRenderer()
+    surface = pygame.Surface((800, 600), pygame.SRCALPHA)
+    camera = Camera.fit((800, 600), (0, 0, 800, 600))
+    renderer.draw(surface, surface.get_rect(), colony, camera, appearance)
+    assert len(renderer._grains) == 4 * len(colony.nodes) >= 340
+    node = colony.nodes[colony.anchor_index]
+    point = (round(node.position[0] + colony.spacing * 0.9), round(node.position[1]))
+    color = surface.get_at(point)
+    difference = sum(abs(color[axis] - appearance.tissue_color[axis]) for axis in (0, 1, 2))
+    full_glow = sum(abs(appearance.core_color[axis] - appearance.tissue_color[axis]) for axis in (0, 1, 2))
+    assert color.a > 200 and difference < full_glow * 0.5

@@ -48,7 +48,7 @@ class ChamberRenderer:
         surface.blit(
             self._label("SIMULATION CHAMBER", self.MUTED), (24, 50)
         )
-        phase = self._label("PHASE 1C-B", self.ACCENT)
+        phase = self._label("PHASE 1C-C", self.ACCENT)
         surface.blit(phase, (width - phase.get_width() - 24, 29))
 
         chamber = pygame.Rect(24, 82, max(1, width - 48), max(1, height - 128))

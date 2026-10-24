@@ -14,8 +14,8 @@ class GrabConstraint:
     def force(self, position, velocity, world_size, radius, scale):
         target = tuple(min(size - radius, max(radius, point + offset))
                        for size, point, offset in zip(world_size, self.target, self.offset))
-        fx = 180 * (target[0] - position[0]) - 28 * velocity[0]
-        fy = 180 * (target[1] - position[1]) - 28 * velocity[1]
+        fx = 120 * (target[0] - position[0]) - 20 * velocity[0]
+        fy = 120 * (target[1] - position[1]) - 20 * velocity[1]
         magnitude = hypot(fx, fy)
         limit = 14_000 * scale
         if magnitude > limit:

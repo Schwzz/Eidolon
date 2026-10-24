@@ -19,9 +19,10 @@ def physical_state(colony):
 
 
 @pytest.mark.parametrize("seed", [0, 1, 17, 42, 999, -3])
-def test_seeded_colony_has_20_to_30_connected_nodes_with_physical_data(seed) -> None:
+def test_seeded_colony_has_dense_bounded_connected_nodes_with_physical_data(seed) -> None:
     colony = Colony(seed, (600, 400), 24)
-    assert 20 <= len(colony.nodes) <= 30
+    assert 85 <= len(colony.nodes) <= 98
+    assert max(node.radius for node in colony.nodes) < 3.7  # Previously roughly 8 world units.
     assert physical_state(colony) == physical_state(Colony(seed, (600, 400), 24))
     reached, pending = set(), [0]
     while pending:

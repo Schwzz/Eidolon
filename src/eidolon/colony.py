@@ -9,6 +9,7 @@ from math import ceil, cos, exp, hypot, isfinite, sin, sqrt
 from random import Random
 
 from eidolon.interaction import GrabConstraint
+from eidolon.spatial import nearby_pairs
 
 
 Point = tuple[float, float]
@@ -37,16 +38,20 @@ class Bond:
     rest_direction: Point
     phase: float
     created_at: float = -1.0
+    capture_length: float = 0.0
 
 
 class Colony:
     MAX_STEP = 1 / 120
     SOLVER_ITERATIONS = 5
-    ROW_PLANS = ((3, 5, 6, 5, 4), (3, 4, 5, 6, 5, 3), (2, 4, 5, 6, 5, 3))
-    BREAK_FORCE = 6000.0
-    BREAK_STRAIN = 0.035
+    ROW_PLANS = ((6, 8, 10, 12, 13, 13, 12, 10, 8, 6),
+                 (5, 7, 9, 11, 12, 12, 11, 9, 7, 5),
+                 (6, 8, 10, 12, 13, 12, 10, 8, 6))
+    MAX_NEIGHBORS = 8
+    BREAK_FORCE = 1800.0
+    BREAK_STRAIN = 0.18
     BREAK_DWELL = 0.12
-    RECONNECT_DELAY = 0.7
+    RECONNECT_DELAY = 0.45
 
     def __init__(self, seed: int, center: Point, base_radius: float) -> None:
         if not isfinite(base_radius) or base_radius <= 0:
@@ -54,7 +59,7 @@ class Colony:
         rng = Random(seed ^ 0xC010F1)
         rows = rng.choice(self.ROW_PLANS)
         self.base_radius = base_radius
-        self.spacing = base_radius * 0.85
+        self.spacing = base_radius * 0.375
         self.scale = 1.0
         self.elapsed_seconds = 0.0
         self.wall_contacts = 0
@@ -63,6 +68,7 @@ class Colony:
         self.reconnected_bonds = 0
         self._tension: dict[tuple[int, int], float] = {}
         self._cooldown: dict[tuple[int, int], float] = {}
+        self._scars: set[int] = set()
         self._next_break = 0.0
         self._next_reconnect = 0.0
         self.phase = rng.uniform(0, 6.283185307)
@@ -78,15 +84,13 @@ class Colony:
         for node in self.nodes:
             node.position = (node.position[0] - offset[0] + center[0], node.position[1] - offset[1] + center[1])
         self.bonds: list[Bond] = []
-        for first, a in enumerate(self.nodes):
-            for second in range(first + 1, len(self.nodes)):
-                b = self.nodes[second]
-                dx, dy = b.position[0] - a.position[0], b.position[1] - a.position[1]
-                distance = hypot(dx, dy)
-                if distance <= self.spacing * 2.05:
-                    compliance = 0.0005 if distance < self.spacing * 1.5 else 0.004
-                    self.bonds.append(Bond(first, second, distance, compliance,
-                                           (dx / distance, dy / distance), (a.position[0] - center[0]) / self.spacing))
+        for first, second in nearby_pairs([node.position for node in self.nodes], self.spacing * 1.3):
+            a, b = self.nodes[first], self.nodes[second]
+            dx, dy = b.position[0] - a.position[0], b.position[1] - a.position[1]
+            distance = hypot(dx, dy)
+            if distance <= self.spacing * 1.3:
+                self.bonds.append(Bond(first, second, distance, 0.0015,
+                                       (dx / distance, dy / distance), (a.position[0] - center[0]) / self.spacing))
         self.rebuild_topology()
         self.anchor_index = min(range(len(self.nodes)), key=lambda i: hypot(
             self.nodes[i].position[0] - center[0], self.nodes[i].position[1] - center[1]))
@@ -179,38 +183,56 @@ class Colony:
             self.bonds = [bond for bond in self.bonds if (bond.first, bond.second) != key]
             self._tension.pop(key, None)
             self._cooldown[key] = self.elapsed_seconds + self.RECONNECT_DELAY
+            self._scars.update(key)
             self._next_break = self.elapsed_seconds + 0.05
             self._next_reconnect = self.elapsed_seconds + self.RECONNECT_DELAY
             self.broken_bonds += 1
             self.rebuild_topology()
 
     def _heal(self) -> None:
-        if len(self.components) == 1 or self.elapsed_seconds < self._next_reconnect:
+        if self.grab is not None or self.elapsed_seconds < self._next_reconnect:
             return
-        held = self._component_index[self.grab.node] if self.grab is not None else None
+        if len(self.components) == 1 and not self._scars:
+            return
+        self._next_reconnect = self.elapsed_seconds + 0.05
+        reach = self.spacing * self.scale * 2.0
+        existing = {(bond.first, bond.second) for bond in self.bonds}
         candidates = []
-        reach = self.spacing * self.scale * 1.2
-        for component_index, component in enumerate(self.components[1:], 1):
-            if component_index == held or held == 0:
+        for key in nearby_pairs([node.position for node in self.nodes], reach):
+            if key in existing or self.elapsed_seconds < self._cooldown.get(key, 0):
                 continue
-            for first in self.components[0]:
-                for second in component:
-                    key = tuple(sorted((first, second)))
-                    if self.elapsed_seconds < self._cooldown.get(key, 0):
-                        continue
-                    a, b = self.nodes[key[0]], self.nodes[key[1]]
-                    distance = hypot(a.position[0] - b.position[0], a.position[1] - b.position[1])
-                    if 1e-6 < distance <= reach and hypot(a.velocity[0] - b.velocity[0], a.velocity[1] - b.velocity[1]) <= 90:
-                        candidates.append((distance, key))
-        if candidates:
-            distance, key = min(candidates)
+            separate = self._component_index[key[0]] != self._component_index[key[1]]
+            if not separate and not self._scars.intersection(key):
+                continue
             a, b = self.nodes[key[0]], self.nodes[key[1]]
-            self.bonds.append(Bond(*key, distance / self.scale, 0.001,
+            distance = hypot(a.position[0] - b.position[0], a.position[1] - b.position[1])
+            weak = any(index in self._scars and len(self.nodes[index].connections) < 3 for index in key)
+            capture_reach = self.spacing * self.scale * (1.65 if separate else 2.0 if weak else 1.3)
+            if 1e-6 < distance <= capture_reach:
+                candidates.append((not separate, distance, key))
+        degrees = [len(node.connections) for node in self.nodes]
+        added = 0
+        for _, distance, key in sorted(candidates):
+            if max(degrees[key[0]], degrees[key[1]]) >= self.MAX_NEIGHBORS:
+                continue
+            a, b = self.nodes[key[0]], self.nodes[key[1]]
+            # Capture at the actual gap, then ease toward a compact local bond.
+            # Dampen contact instead of rejecting fast fragments indefinitely.
+            self.bonds.append(Bond(*key, min(distance / self.scale, self.spacing * 1.05), 0.0015,
                                    ((b.position[0] - a.position[0]) / distance, (b.position[1] - a.position[1]) / distance),
-                                   0.0, self.elapsed_seconds))
-            self.bonds.sort(key=lambda bond: (bond.first, bond.second))
-            self._next_reconnect = self.elapsed_seconds + 0.10
+                                   0.0, self.elapsed_seconds, distance / self.scale))
+            average = tuple((a.velocity[axis] * a.mass + b.velocity[axis] * b.mass) / (a.mass + b.mass) for axis in (0, 1))
+            a.velocity = tuple(average[axis] + (a.velocity[axis] - average[axis]) * 0.3 for axis in (0, 1))
+            b.velocity = tuple(average[axis] + (b.velocity[axis] - average[axis]) * 0.3 for axis in (0, 1))
+            degrees[key[0]] += 1
+            degrees[key[1]] += 1
+            self._scars.update(key)
             self.reconnected_bonds += 1
+            added += 1
+            if added >= 8:
+                break
+        if added:
+            self.bonds.sort(key=lambda bond: (bond.first, bond.second))
             self.rebuild_topology()
 
     def begin_step(self) -> None:
@@ -270,6 +292,13 @@ class Colony:
         held = self._component_index[self.grab.node] if self.grab is not None else None
         main_goal = ((0.0, 0.0) if held == 0 else
                      tuple(value * (0.35 if len(self.components) > 1 else 1.0) for value in desired))
+        # Ease locomotion before a wall instead of continually compressing the
+        # entire mesh into it. Pointer forces still use the physical wall solve.
+        clearance = [min((node.position[axis] - node.radius * MEMBRANE_RADIUS
+                          if main_goal[axis] < 0 else world_size[axis] - node.position[axis] - node.radius * MEMBRANE_RADIUS)
+                         for node in (nodes[index] for index in self.components[0])) for axis in (0, 1)]
+        main_goal = tuple(value * min(1.0, max(0.0, gap / (self.spacing * self.scale * 1.5)))
+                          for value, gap in zip(main_goal, clearance))
         desired_speed = hypot(*main_goal)
         direction = (main_goal[0] / desired_speed, main_goal[1] / desired_speed) if desired_speed else (0, 0)
         goals = [(main_goal, velocity)]
@@ -283,12 +312,15 @@ class Colony:
                     for a in component for b in self.components[0]
                 )
                 a, b = nodes[first], nodes[second]
-                closing_speed = min(75.0, max(0.0, distance - self.spacing * self.scale * 0.84) * 3)
+                closing_speed = min(90.0, max(0.0, distance - self.spacing * self.scale * 0.85) * 4)
                 goal = (velocity[0] + (b.position[0] - a.position[0]) / max(distance, 1e-6) * closing_speed,
                         velocity[1] + (b.position[1] - a.position[1]) / max(distance, 1e-6) * closing_speed)
             goals.append((goal, fragment_velocity))
         activity = min(1.0, desired_speed / 55)
         maximum_speed = 220 * sqrt(self.scale)
+        velocity_damping = exp(-0.8 * dt)
+        relative_damping = exp(-2.0 * dt)
+        cell_size = max(node.radius for node in nodes) * 1.84
         old_positions = [node.position for node in nodes]
         for node in nodes:
             if not all(isfinite(v) for v in (*node.position, *node.velocity)):
@@ -300,17 +332,19 @@ class Colony:
             component_index = self._component_index[node.identifier]
             goal, component_velocity = goals[component_index]
             traction = min(1.8, max(0.25, 1 + projection * 0.9)) if component_index == 0 else 1.0
-            fx = (goal[0] - component_velocity[0]) * 12 * traction
-            fy = (goal[1] - component_velocity[1]) * 12 * traction
+            # A held component is free to follow the spring: controller braking
+            # against every particle made dense colonies feel rigid to the hand.
+            driving = 0.0 if held == component_index else 12.0
+            fx = (goal[0] - component_velocity[0]) * driving * traction
+            fy = (goal[1] - component_velocity[1]) * driving * traction
             if self.grab is not None and self.grab.node == node.identifier:
                 grab_force = self.grab.force(node.position, node.velocity, world_size, node.radius * MEMBRANE_RADIUS, self.scale)
                 fx += grab_force[0]
                 fy += grab_force[1]
-            vx = (node.velocity[0] + fx / node.mass * dt) * exp(-0.8 * dt)
-            vy = (node.velocity[1] + fy / node.mass * dt) * exp(-0.8 * dt)
+            vx = (node.velocity[0] + fx / node.mass * dt) * velocity_damping
+            vy = (node.velocity[1] + fy / node.mass * dt) * velocity_damping
             # Damp relative motion and angular drift without forcing a pose or
             # rotating the colony to match its steering direction.
-            relative_damping = exp(-2.0 * dt)
             vx = component_velocity[0] + (vx - component_velocity[0]) * relative_damping
             vy = component_velocity[1] + (vy - component_velocity[1]) * relative_damping
             magnitude = hypot(vx, vy)
@@ -318,7 +352,8 @@ class Colony:
                 vx, vy = vx * maximum_speed / magnitude, vy * maximum_speed / magnitude
             node.position = (node.position[0] + vx * dt, node.position[1] + vy * dt)
         self.elapsed_seconds += dt
-        targets = [bond.rest_length * self.scale * (
+        targets = [(bond.rest_length + (bond.capture_length - bond.rest_length)
+                    * exp(-3 * (self.elapsed_seconds - bond.created_at)) if bond.capture_length else bond.rest_length) * self.scale * (
             1 + 0.015 * sin(self.elapsed_seconds * 1.6 + self.phase)
             + 0.065 * activity * sin(self.elapsed_seconds * 2.3 - bond.phase * 0.8 + self.phase)
         ) for bond in self.bonds]
@@ -338,17 +373,17 @@ class Colony:
                     change -= (distance - targets[index] * 1.75) / (inverse_a + inverse_b)
                 a.position = (a.position[0] - nx * change * inverse_a, a.position[1] - ny * change * inverse_a)
                 b.position = (b.position[0] + nx * change * inverse_b, b.position[1] + ny * change * inverse_b)
-            for first, a in enumerate(nodes):
-                for b in nodes[first + 1:]:
-                    dx, dy = b.position[0] - a.position[0], b.position[1] - a.position[1]
-                    minimum = (a.radius + b.radius) * 0.92
+            for first, second in nearby_pairs([node.position for node in nodes], cell_size):
+                a, b = nodes[first], nodes[second]
+                dx, dy = b.position[0] - a.position[0], b.position[1] - a.position[1]
+                minimum = (a.radius + b.radius) * 0.92
+                if dx * dx + dy * dy < minimum * minimum:
                     distance = hypot(dx, dy)
-                    if distance < minimum:
-                        nx, ny = (dx / distance, dy / distance) if distance > 1e-9 else (1.0, 0.0)
-                        inverse_a, inverse_b = 1 / a.mass, 1 / b.mass
-                        correction = (minimum - distance) / (inverse_a + inverse_b)
-                        a.position = (a.position[0] - nx * correction * inverse_a, a.position[1] - ny * correction * inverse_a)
-                        b.position = (b.position[0] + nx * correction * inverse_b, b.position[1] + ny * correction * inverse_b)
+                    nx, ny = (dx / distance, dy / distance) if distance > 1e-9 else (1.0, 0.0)
+                    inverse_a, inverse_b = 1 / a.mass, 1 / b.mass
+                    correction = (minimum - distance) / (inverse_a + inverse_b)
+                    a.position = (a.position[0] - nx * correction * inverse_a, a.position[1] - ny * correction * inverse_a)
+                    b.position = (b.position[0] + nx * correction * inverse_b, b.position[1] + ny * correction * inverse_b)
             for node in nodes:
                 radius = node.radius * MEMBRANE_RADIUS
                 if not (radius <= node.position[0] <= world_size[0] - radius
