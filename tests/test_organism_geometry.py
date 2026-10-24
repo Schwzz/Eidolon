@@ -8,7 +8,7 @@ from eidolon.organism_geometry import (
 )
 
 
-PROFILE_SEEDS = [0, 2, 3, 8]  # blade, crown, mantle, cleft
+PROFILE_SEEDS = [0, 2, 3, 4, 8]  # jelly, veil, creeper, blob, parasite
 
 
 def sample_body(organism):
@@ -17,19 +17,20 @@ def sample_body(organism):
 
 
 @pytest.mark.parametrize("seed", PROFILE_SEEDS)
-def test_body_is_irregular_rather_than_circular(seed) -> None:
+def test_body_is_soft_and_lopsided_rather_than_a_regular_spiked_star(seed) -> None:
     points = sample_body(Symbiote(seed))
     edges = tuple(zip(points, points[1:] + points[:1]))
     area = abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in edges)) / 2
     perimeter = sum(hypot(b[0] - a[0], b[1] - a[1]) for a, b in edges)
-    # Circularity is 1 for a circle; deep recesses and unequal lobes lower it.
-    assert 0.25 < 4 * pi * area / perimeter**2 < 0.80
+    # Soft masses may be much rounder than the old deeply cut, pointed profiles;
+    # elongated parasites have lower circularity than the broad membrane plans.
+    assert 0.50 < 4 * pi * area / perimeter**2 < 0.97
     # Opposite sides must also differ, rather than forming a regular star.
     opposite_error = sum(hypot(a[0] + b[0], a[1] + b[1]) for a, b in zip(points[:80], points[80:])) / 80
-    assert opposite_error > 0.25
+    assert opposite_error > 0.20
 
 
-def test_all_four_profiles_have_distinct_outlines() -> None:
+def test_all_five_profiles_have_distinct_outlines() -> None:
     organisms = [Symbiote(seed) for seed in PROFILE_SEEDS]
     assert {organism.appearance.body.profile for organism in organisms} == set(BODY_PROFILES)
     outlines = [sample_body(organism) for organism in organisms]

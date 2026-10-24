@@ -1,4 +1,5 @@
 import random
+from math import cos, pi, sin
 
 import pytest
 
@@ -29,7 +30,7 @@ def test_seeded_parameters_are_bounded_and_tendrils_are_independent(seed) -> Non
     assert len({t.phase for t in appearance.tendrils}) == len(appearance.tendrils)
     assert len({t.frequency for t in appearance.tendrils}) == len(appearance.tendrils)
     for tendril in appearance.tendrils:
-        assert 1.15 <= tendril.length <= 2.05
+        assert 1.35 <= tendril.length <= 3.10
         assert 0.65 <= tendril.frequency <= 1.30
     for color in (appearance.membrane_color, appearance.tissue_color, appearance.core_color):
         assert len(color) == 3
@@ -66,10 +67,22 @@ def test_same_seed_and_update_sequence_produce_same_motion() -> None:
 
 def test_seeds_cover_profiles_palettes_and_layer_parameters() -> None:
     appearances = [generate_appearance(seed) for seed in range(64)]
-    assert {appearance.body.profile for appearance in appearances} == {"mantle", "cleft", "crown", "blade"}
+    assert {appearance.body.profile for appearance in appearances} == {"blob", "parasite", "veil", "jelly", "creeper"}
     assert len({appearance.membrane_color for appearance in appearances}) > 32
     for appearance in appearances:
         assert -0.22 <= appearance.body.shear <= 0.22
-        assert 4 <= appearance.body.ridge_count <= 7
+        assert 2 <= appearance.body.fold_count <= 4
         assert 38 <= appearance.body.membrane_alpha <= 65
         assert all(0 <= channel <= 255 for channel in appearance.accent_color)
+
+
+@pytest.mark.parametrize("seed", [0, 2, 3, 4, 8, 17])
+def test_appendages_cluster_on_a_trailing_edge_instead_of_forming_radial_spikes(seed) -> None:
+    appearance = generate_appearance(seed)
+    attachments = [tendril.angle for tendril in appearance.tendrils]
+    assert max(attachments) - min(attachments) < pi
+    # Heading agreement near 1 means coherent flow; a radial star averages to 0.
+    count = len(appearance.tendrils)
+    heading_x = sum(cos(tendril.heading) for tendril in appearance.tendrils) / count
+    heading_y = sum(sin(tendril.heading) for tendril in appearance.tendrils) / count
+    assert (heading_x**2 + heading_y**2) ** 0.5 > 0.90

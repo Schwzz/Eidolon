@@ -1,9 +1,9 @@
 # EIDOLON
 
-An experimental artificial-life sandbox for Windows desktop. **Phase 1A.1:
-Symbiote Visual Rework** gives the single organism an irregular alien silhouette,
-thick muscular appendages, overlapping translucent folds, and an embedded glowing
-core. Its tissue contracts and deforms while the specimen gently drifts and turns.
+An experimental artificial-life sandbox for Windows desktop. **Phase 1A.2: 2D
+Symbiote Rework** presents a single flat, semi-liquid creature made of soft tissue,
+trailing appendages, translucent membranes, and restrained internal light.
+Its lopsided body contracts and deforms while it gently drifts and turns.
 These are procedural idle animations; there are no neural networks, memory,
 genetics, evolution, reproduction, or environmental interactions.
 No cloud APIs, external AI services, credentials, or network connection are
@@ -57,8 +57,8 @@ Pygame/platform versions.
 
 This visual rework changes the appearance associated with older Phase 1A seeds.
 The same seed remains reproducible within the new appearance generator. To compare
-the four body families, try `--seed 0` (blade), `--seed 2` (crown), `--seed 3`
-(mantle), and `--seed 8` (cleft).
+the five body families, try `--seed 0` (jelly), `--seed 2` (veil), `--seed 3`
+(creeper), `--seed 4` (blob), and `--seed 8` (parasite).
 
 The default rendering limit is 60 FPS; `--max-fps 0` disables the limit and can
 increase CPU use. Simulation updates use a separate fixed 60 Hz timestep.
@@ -81,24 +81,40 @@ animation time without changing the simulation timestep or frame limit.
 | Parameters | Purpose |
 | --- | --- |
 | Membrane, tissue, accent, and core RGB colors | Teal, blue, violet, rose, or mineral-gold tissue with contrasting internal light |
-| Body profile | Mantle: elongated and folded; cleft: deeply recessed; crown: unequal lobes; blade: sweeping lateral anatomy |
+| Body profile | Blob: rounded/lopsided; parasite: elongated; veil: broad membrane; jelly: scalloped bell; creeper: low trailing mass |
 | Width/height, shear, fold depth, lobe amplitude, phase | Seeded proportions and a shared, continuously deforming contraction field |
-| Ridge count and membrane opacity | Embedded curved skeletal struts and overlapping translucent tissue |
-| 7–11 appendages | Each stores attachment position, length, curl, sway, frequency, phase, and thickness |
+| Fold count, membrane opacity, and trailing direction | A few translucent 2D sheets and a coherent flow through the silhouette |
+| 7–11 appendages | Each stores clustered attachment position, length, curl, sway, frequency, phase, thickness, and heading |
 | Core radius, elongation, offset, pulse rate, phase | A profile-specific location, irregular luminous sheath, and subtle pulse |
 
 Dimensions are relative to the nominal body radius; angles use radians and
 frequencies use radians per animation second. Appearance is generated once.
 The stored tendril `angle` encodes a periodic position along the body contour;
-roots follow its local outward normal instead of forming evenly spaced radial
-antennae. A broad root starts beneath the body and becomes a smoothly tapered
-filled ribbon. Body contraction drives proximal motion, with smaller delayed
-waves toward the tips and modest per-appendage variation. These are analytic
+attachments occupy a limited trailing part of the contour. Roots start beneath
+the body, follow its local outward normal, then gradually turn into the body's
+shared flow direction. Long, tapering ribbons form S-bends and curling tips,
+rather than rigid outward horns or a radial star. Body contraction drives
+proximal motion, with delayed waves toward the tips and modest per-appendage
+variation. Small membrane webs fuse neighboring roots. These are analytic
 animations, not muscle physics or environmental behavior.
 
-Closed Catmull–Rom contours provide genuinely different anatomy rather than
-perturbing an oval. The core moves with the same tissue deformation, and masked
-folds, curved struts, and illuminated conduits connect it to the surrounding mass.
+Closed Catmull–Rom contours interpolate rounded masses with unequal lobes and
+gentle recesses. Each body plan has its own contour, attachment region, trailing
+direction, and internal core location. The core moves with the same tissue field.
+
+## Flat 2D rendering
+
+The art uses one flat ink color across each appendage, a translucent body fill,
+and a few irregular, low-contrast membrane washes. All shapes are drawn in the
+same 2D plane. There are **no tube highlights, directional surface lighting,
+bevels, rib bands, armor plates, concentric shells, or projected 3D geometry**.
+The old blade/crown/cleft/mantle profiles have been replaced.
+
+Only the embedded core emits a cached soft radial glow. Its irregular luminous
+organ and two faint flowing filaments sit within the tissue silhouette; they do
+not behave like a glossy sphere or a mechanical lamp. Flat translucent sheets
+and negative spaces, rather than simulated 3D volume, provide depth and detail.
+
 `Symbiote` holds only appearance and animation clocks; `OrganismPose` contains
 read-only drift, rotation, breathing, and core pulse values. No image assets,
 audio initialization, GPU-specific features, workers, or new dependencies are used.
@@ -106,10 +122,9 @@ audio initialization, GPU-specific features, workers, or new dependencies are us
 ## Performance
 
 The target is **60 FPS at 1280 × 720** on an i5-1135G7 / Iris Xe / 8 GB RAM.
-The renderer uses 80 membrane samples and 24 segments per appendage. Filled ribbon
-meshes with a small number of shading strips provide rounded muscle volume;
-masked tissue layers and soft cached lighting add depth without fluid simulation.
-Sampling positions, radial light stamps, and three local surfaces (drawing,
+The renderer uses 96 membrane samples and 32 segments per appendage. A single
+filled silhouette replaces the former per-appendage volume/shading strips.
+Sampling positions, the core light stamp, and three local surfaces (drawing,
 compositing, and silhouette mask) are reused. NumPy light calculations run only
 when appearance or view scale changes. There are no particles, real-time blurs,
 fluid simulations, or per-frame full-window effect surfaces. Sprite scale is
@@ -134,9 +149,11 @@ driver for Linux/cloud checks and does not measure native Windows presentation.
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Tests cover settings, seeded appearance, all four profiles, noncircular/asymmetric
-contours, continuous deformation, broad attached roots, tapering, connected
-silhouettes, rendering/cache reuse, and unchanged simulation controls. The existing
+Tests cover settings, seeded appearance, all five rounded/asymmetric profiles,
+clustered nonradial attachments, continuous deformation, broad attached roots,
+tapering, connected silhouettes, flat appendage cross-sections, rendering/cache
+reuse, and unchanged simulation controls. Visual expectations have been updated
+for the new plans and longer appendages; the existing
 fixed-step timing, interpolation, catch-up, startup, resize, shutdown, and CLI tests
 remain in place. SDL's dummy video/audio drivers make the tests suitable for a headless
 machine. The application tests create real Pygame surfaces but inject events and
@@ -186,4 +203,5 @@ python3 -m venv .venv
 .venv/bin/python -m eidolon  # Requires a graphical desktop
 ```
 
+This visual iteration is awaiting review and approval before publication.
 Phase 1B is outside this implementation and requires explicit approval.
