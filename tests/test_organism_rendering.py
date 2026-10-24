@@ -92,3 +92,41 @@ def test_renderer_preserves_destination_clip() -> None:
     SymbioteRenderer().draw(surface, surface.get_rect(), Symbiote(17))
     assert surface.get_clip() == clip
     assert surface.get_at((50, 50))[:3] == (1, 2, 3)
+
+
+@pytest.mark.parametrize("seed", [0, 2, 3, 8, 17])
+def test_body_and_appendages_form_one_connected_silhouette(seed) -> None:
+    renderer = SymbioteRenderer()
+    surface = pygame.Surface((800, 800), pygame.SRCALPHA)
+    organism = Symbiote(seed)
+    organism.update(2.5)
+    renderer.draw(surface, surface.get_rect(), organism)
+    components = pygame.mask.from_surface(surface, threshold=40).get_bounding_rects()
+    significant = [rect for rect in components if rect.width * rect.height > 16]
+    assert len(significant) == 1
+
+
+def test_renderer_rebuilds_tissue_effects_when_appearance_changes() -> None:
+    renderer = SymbioteRenderer()
+    surface = pygame.Surface((800, 800))
+    renderer.draw(surface, surface.get_rect(), Symbiote(17))
+    old_layer, old_mask, old_light = renderer._layer, renderer._mask, renderer._tissue_light
+    renderer.draw(surface, surface.get_rect(), Symbiote(13))
+    assert renderer._layer is not old_layer
+    assert renderer._mask is not old_mask
+    assert renderer._tissue_light is not old_light
+
+
+def test_rendering_after_reset_has_no_cached_tissue_or_mask_ghosts() -> None:
+    renderer = ChamberRenderer()
+    simulation = Simulation(17)
+    surface = pygame.Surface((1280, 720))
+    renderer.draw(surface, simulation)
+    initial = pixels(surface)
+    simulation.update(9)
+    renderer.draw(surface, simulation)
+    simulation.reset()
+    renderer.draw(surface, simulation)
+    assert pixels(surface) == initial
+    ChamberRenderer().draw(surface, simulation)
+    assert pixels(surface) == initial

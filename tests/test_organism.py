@@ -62,3 +62,14 @@ def test_same_seed_and_update_sequence_produce_same_motion() -> None:
     assert pose.rotation != initial.rotation
     assert pose.breath != initial.breath
     assert pose.core_pulse != initial.core_pulse
+
+
+def test_seeds_cover_profiles_palettes_and_layer_parameters() -> None:
+    appearances = [generate_appearance(seed) for seed in range(64)]
+    assert {appearance.body.profile for appearance in appearances} == {"mantle", "cleft", "crown", "blade"}
+    assert len({appearance.membrane_color for appearance in appearances}) > 32
+    for appearance in appearances:
+        assert -0.22 <= appearance.body.shear <= 0.22
+        assert 4 <= appearance.body.ridge_count <= 7
+        assert 38 <= appearance.body.membrane_alpha <= 65
+        assert all(0 <= channel <= 255 for channel in appearance.accent_color)
