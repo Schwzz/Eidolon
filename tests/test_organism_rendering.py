@@ -65,7 +65,8 @@ def test_organism_is_visible_and_stays_inside_chamber_when_resized(size) -> None
     renderer.draw(occupied, simulation)
     renderer.draw(empty)
     chamber = pygame.Rect(24, 82, size[0] - 48, size[1] - 128)
-    center = occupied.get_at(chamber.center)[:3]
+    position = renderer.camera.world_to_screen(simulation.life.position)
+    center = occupied.get_at(tuple(round(value) for value in position))[:3]
     assert center != ChamberRenderer.CHAMBER
     assert pixels(occupied.subsurface(chamber)) != pixels(empty.subsurface(chamber))
     assert occupied.get_at((0, 0))[:3] == ChamberRenderer.BACKGROUND

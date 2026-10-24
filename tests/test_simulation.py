@@ -41,12 +41,15 @@ def test_pause_freezes_organism_and_simulation_time() -> None:
     assert simulation.organism.age_seconds == pytest.approx(2 / 60)
 
 
-def test_speed_changes_animation_without_changing_fixed_step_accounting() -> None:
+def test_speed_scales_world_time_and_animation_with_fixed_step_accounting() -> None:
     simulation = Simulation()
     simulation.set_animation_speed(0.5)
     for _ in range(60):
         simulation.update(1 / 60)
-    assert simulation.elapsed_seconds == pytest.approx(1)
+    assert simulation.elapsed_seconds == pytest.approx(0.5)
+    assert simulation.world.elapsed_seconds == pytest.approx(0.5)
+    assert simulation.life.age_seconds == pytest.approx(0.5)
+    assert simulation.steps == 60
     assert simulation.organism.age_seconds == pytest.approx(0.5)
 
 

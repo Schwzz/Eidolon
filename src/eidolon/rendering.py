@@ -3,6 +3,7 @@
 import pygame
 
 from eidolon.organism_rendering import SymbioteRenderer
+from eidolon.camera import Camera
 from eidolon.simulation import Simulation
 
 
@@ -21,10 +22,13 @@ class ChamberRenderer:
         self._label_font = pygame.font.Font(None, 20)
         self._organism_renderer = SymbioteRenderer()
         self._labels: dict[tuple[str, tuple[int, int, int]], pygame.Surface] = {}
+        self.camera: Camera | None = None
 
     def _label(self, text: str, color: tuple[int, int, int]) -> pygame.Surface:
         key = (text, color)
         if key not in self._labels:
+            if len(self._labels) >= 128:
+                self._labels.clear()  # Dynamic age/energy labels must not accumulate forever.
             self._labels[key] = self._label_font.render(text, True, color)
         return self._labels[key]
 
@@ -39,7 +43,7 @@ class ChamberRenderer:
         surface.blit(
             self._label("SIMULATION CHAMBER", self.MUTED), (24, 50)
         )
-        phase = self._label("PHASE 1A.2", self.ACCENT)
+        phase = self._label("PHASE 1B", self.ACCENT)
         surface.blit(phase, (width - phase.get_width() - 24, 29))
 
         chamber = pygame.Rect(24, 82, max(1, width - 48), max(1, height - 128))
@@ -47,16 +51,36 @@ class ChamberRenderer:
         pygame.draw.rect(surface, self.BORDER, chamber, width=1, border_radius=10)
 
         if simulation is not None:
+            world = simulation.world.config
+            viewport = (chamber.left + 10, chamber.top + 10, chamber.width - 20, chamber.height - 68)
+            self.camera = Camera.fit((world.width, world.height), viewport)
+            camera = self.camera
+            world_rect = pygame.Rect(*camera.offset, world.width * camera.scale, world.height * camera.scale)
+            pygame.draw.rect(surface, (30, 44, 48), world_rect, width=1)
+            for food in simulation.world.foods:
+                position = tuple(round(value) for value in camera.world_to_screen(food.position))
+                radius = max(1, round(food.radius * camera.scale))
+                pygame.draw.circle(surface, (36, 53, 39), position, radius + 2)
+                pygame.draw.circle(surface, (161, 191, 119), position, radius)
+            interpolation = 1.0 if simulation.paused or not simulation.life.alive else alpha
+            life_pose = simulation.life.sample(interpolation)
             self._organism_renderer.draw(
-                surface, chamber, simulation.organism, 1.0 if simulation.paused else alpha,
+                surface, world_rect, simulation.organism, interpolation,
+                center=camera.world_to_screen(life_pose.position),
+                body_radius=simulation.life.base_radius * life_pose.scale * camera.scale,
+                heading=life_pose.direction,
             )
-            appearance = simulation.organism.appearance
-            specimen = f"SEED {appearance.seed}   /   {len(appearance.tendrils)} TENDRILS"
-            status = f"{'PAUSED' if simulation.paused else 'LIVE'}  {simulation.animation_speed:.2f}x"
-            surface.blit(self._label(specimen, self.MUTED), (40, height - 68))
-            status_label = self._label(status, self.ACCENT)
-            surface.blit(status_label, (width - status_label.get_width() - 40, height - 68))
-            controls = "SPACE Pause   R Reset   -/+ Speed"
+            life = simulation.life
+            energy = f"ENERGY {life.energy:.0f}/{life.max_energy:.0f}   AGE {life.age_seconds:.0f}s"
+            surface.blit(self._label(energy, self.MUTED), (40, height - 91))
+            status_label = self._label("ALIVE" if life.alive else "DEAD", self.ACCENT if life.alive else (184, 106, 118))
+            surface.blit(status_label, (width - status_label.get_width() - 40, height - 91))
+            growth = f"SIZE {life.body_scale:.2f}x   FOOD {len(simulation.world.foods)}"
+            surface.blit(self._label(growth, self.MUTED), (40, height - 68))
+            speed = f"{'PAUSED' if simulation.paused else 'RUNNING'} {simulation.speed:.2f}x"
+            speed_label = self._label(speed, self.ACCENT)
+            surface.blit(speed_label, (width - speed_label.get_width() - 40, height - 68))
+            controls = "SPACE Pause   R Restart   -/+ Speed"
         else:
             controls = "EMPTY CHAMBER"
         surface.blit(self._label(controls, self.MUTED), (24, height - 29))

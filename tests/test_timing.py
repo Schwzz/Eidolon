@@ -20,6 +20,11 @@ def test_simulation_rate_is_independent_of_render_rate(render_fps) -> None:
     assert simulation.steps == 120
     assert simulation.elapsed_seconds == pytest.approx(2)
     assert steps == [1 / 60] * 120
+    reference = Simulation()
+    for _ in range(120):
+        reference.update(1 / 60)
+    assert simulation.life == reference.life
+    assert simulation.world.foods == reference.world.foods
 
 
 def test_retains_fractional_time_between_frames() -> None:

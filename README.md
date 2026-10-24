@@ -1,11 +1,10 @@
 # EIDOLON
 
-An experimental artificial-life sandbox for Windows desktop. **Phase 1A.2: 2D
-Symbiote Rework** presents a single flat, semi-liquid creature made of soft tissue,
-trailing appendages, translucent membranes, and restrained internal light.
-Its lopsided body contracts and deforms while it gently drifts and turns.
-These are procedural idle animations; there are no neural networks, memory,
-genetics, evolution, reproduction, or environmental interactions.
+An experimental artificial-life sandbox for Windows desktop. **Phase 1B:
+Environment & Basic Life** adds a bounded world, autonomous exploration and
+feeding, energy, growth, and starvation to the existing 2D symbiote design.
+One organism follows lightweight deterministic survival rules. There are no neural
+networks, memory/learning, evolution, reproduction, or other organisms.
 No cloud APIs, external AI services, credentials, or network connection are
 required to run the installed application.
 
@@ -45,18 +44,16 @@ The default window is 1280 × 720. Close the window or press **Escape** to exit.
 
 | Control | Action |
 | --- | --- |
-| Space | Pause/resume animation; the window remains responsive |
-| R | Restart the same specimen at time zero; retain pause and speed |
-| − / + (or =), including numeric keypad | Change animation speed in 0.25× steps, from 0.25× to 2× |
-| `--seed INTEGER` | Choose a reproducible appearance, including negative seeds |
+| Space | Pause/resume the complete world, including food regeneration and biology |
+| R | Restart the seeded world, food supply, organism, and clocks; retain pause and speed |
+| − / + (or =), including numeric keypad | Change simulation speed in 0.25× steps, from 0.25× to 2× |
+| `--seed INTEGER` | Choose a reproducible world and appearance, including negative seeds |
 
-The same seed, parameters, and simulation time produce the same appearance and
-pose without consuming global random state. Different seeds vary the specimen;
-only one organism exists at a time. Exact rasterized pixels can differ between
-Pygame/platform versions.
+The same seed, settings, and update/input sequence produce the same simulation.
+Appearance generation and food spawning use separate private random generators;
+rendering consumes neither. Exact rasterized pixels can differ between platforms.
 
-This visual rework changes the appearance associated with older Phase 1A seeds.
-The same seed remains reproducible within the new appearance generator. To compare
+Phase 1B preserves the Phase 1A.2 appearance generator and seed mapping. To compare
 the five body families, try `--seed 0` (jelly), `--seed 2` (veil), `--seed 3`
 (creeper), `--seed 4` (blob), and `--seed 8` (parasite).
 
@@ -68,11 +65,65 @@ excess elapsed time is intentionally dropped to preserve responsiveness. Simulat
 time therefore falls behind wall time during sustained overload or debugging pauses.
 Defaults and timing limits live in `src/eidolon/config.py`.
 
-Rendering interpolates the previous/current animation clocks using the fixed-step
-accumulator, with up to one simulation step of visual latency. All motion is a
-function of this clock; rendering never advances simulation state. Pausing freezes
-the organism's animation rather than merely hiding updates. Speed changes scale
-animation time without changing the simulation timestep or frame limit.
+Rendering interpolates world position, heading, body scale, and animation clocks
+with up to one simulation step of visual latency. Rendering never advances the
+world. Speed scales **all** simulation time, not just animation. Integration is
+subdivided into steps no larger than 1/60 second so faster speed or larger caller
+timesteps do not skip feeding interactions. Pause freezes the complete simulation
+and random state. Dead organisms freeze while the world's food regeneration may
+continue; restart restores the original seeded state.
+
+## World, sensing, and survival
+
+The default world is **1200 × 800 world units**, independent of the window. The
+camera fits the complete terrarium uniformly and letterboxes when needed. Resizing
+changes pixels per world unit, never world positions or physical body scale.
+There are no pan/zoom controls in this phase.
+
+Food appears as small green resource dots. Up to 64 may exist, with 32 initially
+spawned and one regenerated every three simulation seconds. Full worlds discard
+missed spawns rather than banking a burst. Each resource has a unique identifier,
+is consumed once, and supplies 18 energy/nutrition units. Spawns stay inside an
+inset reachable even by the fully grown organism.
+
+The organism senses the nearest food within 250 units, turns toward it, and eats
+within a 34-unit interaction radius scaled by growth (plus the food radius).
+Without sensed food it wanders, with an inward steering bias near boundaries.
+Turning is rate-limited. A conservative collision disk contains the complete
+placeholder sprite, including its appendages, and keeps it inside the world.
+It is a simple boundary model, not detailed tissue collision physics.
+
+Energy starts at 70/100. Basal metabolism costs `1 × scale²` energy per second;
+movement costs 0.025 energy per world unit actually traveled. Speed starts at 55
+world units per second and decreases slightly with size. Food restores energy up
+to the maximum and accumulates nutrition. Growth requires energy above 45%, uses
+nutrition to set its target size, proceeds at at most 0.01 scale units/second, and
+costs energy. It stops at 1.6× and waits if there is insufficient boundary clearance.
+Growth changes the physical radius in world units, not the camera.
+
+At zero energy the organism dies, stops deciding/moving/eating/growing, and its age
+and animation freeze. `health` is currently energy-derived vitality (0–100), not an
+independent injury model. The HUD shows energy, age, physical scale, food count,
+alive/dead status, pause state, and simulation speed.
+
+`WorldConfig` and `LifeConfig` in `config.py` expose dimensions, resource capacity,
+regeneration, energy, movement, sensing, feeding, and growth settings. For example,
+run this Python snippet with the installed virtual-environment interpreter to
+observe starvation without food:
+
+```python
+from eidolon.app import Application
+from eidolon.config import AppConfig, WorldConfig
+
+Application(AppConfig(world=WorldConfig(
+    initial_food=0, regeneration_interval=0,
+))).run()
+```
+
+Decisions use the `Controller.decide(Senses) -> Decision` interface. The default
+`SurvivalRules` reads an immutable sensory snapshot and has no learning or memory.
+A future controller can replace it through `Simulation(controller=...)` without
+changing world integration, energy accounting, or rendering.
 
 ## Procedural appearance
 
@@ -95,8 +146,8 @@ the body, follow its local outward normal, then gradually turn into the body's
 shared flow direction. Long, tapering ribbons form S-bends and curling tips,
 rather than rigid outward horns or a radial star. Body contraction drives
 proximal motion, with delayed waves toward the tips and modest per-appendage
-variation. Small membrane webs fuse neighboring roots. These are analytic
-animations, not muscle physics or environmental behavior.
+variation. Small membrane webs fuse neighboring roots. Surface deformation stays
+analytic; biological movement and survival are separate world systems.
 
 Closed Catmull–Rom contours interpolate rounded masses with unequal lobes and
 gentle recesses. Each body plan has its own contour, attachment region, trailing
@@ -127,8 +178,12 @@ filled silhouette replaces the former per-appendage volume/shading strips.
 Sampling positions, the core light stamp, and three local surfaces (drawing,
 compositing, and silhouette mask) are reused. NumPy light calculations run only
 when appearance or view scale changes. There are no particles, real-time blurs,
-fluid simulations, or per-frame full-window effect surfaces. Sprite scale is
-capped and drawing is clipped to the chamber after resizing.
+fluid simulations, or per-frame full-window effect surfaces. In the simulation,
+sprite radius is physical world radius times camera scale (rounded to pixels);
+there is no window-dependent biological resizing. Local surfaces rebuild only
+when pixel radius changes through growth or resizing. Drawing stays in the world
+viewport. Food queries are linear scans over the configured cap (64 by default), and HUD text
+caching is bounded rather than retaining every age/energy label indefinitely.
 Tissue compositing is restricted to the current body's bounding rectangle, rather
 than processing transparent margins around its appendages.
 
@@ -149,11 +204,14 @@ driver for Linux/cloud checks and does not measure native Windows presentation.
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Tests cover settings, seeded appearance, all five rounded/asymmetric profiles,
+Tests cover movement, sensing/approach, one-time feeding, energy costs and limits,
+growth requirements and caps, death, boundaries, seeded resources/regeneration,
+complete pause/reset, replaceable controllers, deterministic simulation, and
+camera resizing without world or physical-size changes. Existing tests cover
+settings, seeded appearance, all five rounded/asymmetric profiles,
 clustered nonradial attachments, continuous deformation, broad attached roots,
 tapering, connected silhouettes, flat appendage cross-sections, rendering/cache
-reuse, and unchanged simulation controls. Visual expectations have been updated
-for the new plans and longer appendages; the existing
+reuse, and simulation controls. The existing
 fixed-step timing, interpolation, catch-up, startup, resize, shutdown, and CLI tests
 remain in place. SDL's dummy video/audio drivers make the tests suitable for a headless
 machine. The application tests create real Pygame surfaces but inject events and
@@ -163,7 +221,7 @@ GitHub Actions is configured to run these tests on Linux and Windows with Python
 3.11–3.14. A configured CI job is not evidence that it has run. Headless tests do
 not verify native Windows graphics, interactive resizing, or performance on the
 target Intel Iris Xe hardware. Those require a manual Windows check: launch the
-application, confirm smooth membrane/tendril motion and a pulsing core, try the
+application, watch food consumption and energy/growth changes, try the full-world
 pause/reset/speed controls, resize in both directions, and exit with both Escape
 and the window close button. Native Windows graphics and target-hardware
 performance have not been verified in the Linux cloud environment.
@@ -176,7 +234,11 @@ src/eidolon/
   app.py                 Pygame lifecycle, events, and main loop
   config.py              Validated immutable application settings
   timing.py              Fixed-step scheduling, catch-up cap, interpolation alpha
-  simulation.py          Single-organism ownership and animation controls
+  simulation.py          World/biology/decision integration and complete reset
+  biology.py             Biological state and read-only interpolated life poses
+  world.py               Bounded coordinates and seeded food lifecycle
+  behavior.py            Sensory/decision interface and simple survival rules
+  camera.py              Display-independent fit camera and coordinate mapping
   organism.py            Seeded parameters, animation state, and sampled poses
   organism_geometry.py   Display-independent contours and appendage meshes
   rendering.py           Chamber layout and controls overlay
@@ -203,5 +265,4 @@ python3 -m venv .venv
 .venv/bin/python -m eidolon  # Requires a graphical desktop
 ```
 
-This visual iteration is awaiting review and approval before publication.
-Phase 1B is outside this implementation and requires explicit approval.
+Phase 2 is outside this implementation and requires explicit approval.

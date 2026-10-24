@@ -13,7 +13,7 @@ from eidolon.timing import FixedStepClock
 class Application:
     def __init__(self, config: AppConfig | None = None) -> None:
         self.config = config if config is not None else AppConfig()
-        self.simulation = Simulation(self.config.seed)
+        self.simulation = Simulation(self.config.seed, self.config.world, self.config.life)
 
     def run(self) -> None:
         """Run until the window closes or Escape is pressed; always release SDL."""
@@ -43,12 +43,12 @@ class Application:
                         elif event.key == pygame.K_r:
                             self.simulation.reset()
                         elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                            self.simulation.set_animation_speed(
-                                max(0.25, self.simulation.animation_speed - 0.25)
+                            self.simulation.set_speed(
+                                max(0.25, self.simulation.speed - 0.25)
                             )
                         elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
-                            self.simulation.set_animation_speed(
-                                min(2.0, self.simulation.animation_speed + 0.25)
+                            self.simulation.set_speed(
+                                min(2.0, self.simulation.speed + 0.25)
                             )
                     elif event.type == pygame.VIDEORESIZE:
                         surface = pygame.display.set_mode(

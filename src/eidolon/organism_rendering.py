@@ -1,6 +1,6 @@
 """Flat translucent silhouettes, drifting membranes, and restrained internal glow."""
 
-from math import cos, sin, tau
+from math import cos, pi, sin, tau
 
 import numpy as np
 import pygame
@@ -59,14 +59,18 @@ class SymbioteRenderer:
     def draw(
         self, destination: pygame.Surface, chamber: pygame.Rect,
         organism: Symbiote, alpha: float = 1.0,
+        *, center: tuple[float, float] | None = None,
+        body_radius: float | None = None, heading: float | None = None,
     ) -> None:
         appearance = organism.appearance
-        radius = max(1, min(95, int(min(chamber.size) / 9.8)))
+        radius = (max(1, round(body_radius)) if body_radius is not None
+                  else max(1, min(95, int(min(chamber.size) / 9.8))))
         self._prepare(appearance, radius)
         pose = organism.pose(alpha)
         canvas, layer, mask = self._canvas, self._layer, self._mask
         canvas.fill((0, 0, 0, 0))
-        cosine, sine = cos(pose.rotation), sin(pose.rotation)
+        rotation = pose.rotation if heading is None else heading - appearance.body.trail_angle + pi + pose.rotation
+        cosine, sine = cos(rotation), sin(rotation)
 
         def project(point: Point) -> tuple[int, int]:
             x, y = point
@@ -164,12 +168,13 @@ class SymbioteRenderer:
         # Balance the trailing tissue in the viewport rather than centering only
         # the body and letting its appendages disappear below the chamber.
         layout = (0.65 * cos(appearance.body.trail_angle), 0.65 * sin(appearance.body.trail_angle))
-        center = (
-            round(chamber.centerx + pose.offset[0] * min(chamber.size)
-                  - radius * (layout[0] * cosine - layout[1] * sine)),
-            round(chamber.centery + pose.offset[1] * min(chamber.size)
-                  - radius * (layout[0] * sine + layout[1] * cosine)),
-        )
+        if center is None:
+            center = (
+                round(chamber.centerx + pose.offset[0] * min(chamber.size)
+                      - radius * (layout[0] * cosine - layout[1] * sine)),
+                round(chamber.centery + pose.offset[1] * min(chamber.size)
+                      - radius * (layout[0] * sine + layout[1] * cosine)),
+            )
         old_clip = destination.get_clip()
         try:
             destination.set_clip(chamber.inflate(-4, -4).clip(old_clip))

@@ -42,7 +42,7 @@ def main() -> None:
         surface = pygame.display.set_mode((config.width, config.height))
         pygame.display.set_caption("EIDOLON rendering benchmark")
         renderer = ChamberRenderer()
-        simulation = Simulation(config.seed)
+        simulation = Simulation(config.seed, config.world, config.life)
         for frame in range(args.frames + warmup):
             started = perf_counter()
             if any(
