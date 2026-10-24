@@ -16,6 +16,9 @@ class Senses:
     clearance: float
     world_size: tuple[float, float]
     food: Food | None
+    speed: float = 0.0
+    speed_reference: float = 55.0
+    sensing_radius: float = 250.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +32,8 @@ class Controller(Protocol):
 
 
 class SurvivalRules:
+    name = "rules"
+
     def __init__(self, seed: int) -> None:
         self.phase = (seed % 65536) * 0.61803398875
 

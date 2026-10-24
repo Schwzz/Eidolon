@@ -42,6 +42,10 @@ class Simulation:
             self.organism.update(0.0)
 
     @property
+    def controller_name(self) -> str:
+        return getattr(self.controller, "name", "custom")
+
+    @property
     def speed(self) -> float:
         return self.animation_speed
 
@@ -144,6 +148,7 @@ class Simulation:
             state.position, state.direction, state.age_seconds,
             state.energy / state.max_energy, state.collision_radius,
             (self.world_config.width, self.world_config.height), sensed_food,
+            speed=state.speed, speed_reference=settings.movement_speed, sensing_radius=settings.sensing_radius,
         ))
         if not isfinite(decision.direction) or not isfinite(decision.speed_fraction):
             raise ValueError("controller decisions must be finite")

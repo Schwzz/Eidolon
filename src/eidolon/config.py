@@ -78,8 +78,11 @@ class AppConfig:
     seed: int = 17
     world: WorldConfig = field(default_factory=WorldConfig)
     life: LifeConfig = field(default_factory=LifeConfig)
+    controller: str = "rules"
 
     def __post_init__(self) -> None:
+        if self.controller not in ("rules", "neural"):
+            raise ValueError("controller must be 'rules' or 'neural'")
         for name in ("width", "height", "max_fps", "simulation_hz", "max_updates_per_frame", "seed"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):

@@ -5,15 +5,20 @@ from time import perf_counter
 import pygame
 
 from eidolon.config import AppConfig, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH
+from eidolon.behavior import Controller
 from eidolon.rendering import ChamberRenderer
 from eidolon.simulation import Simulation
 from eidolon.timing import FixedStepClock
 
 
 class Application:
-    def __init__(self, config: AppConfig | None = None) -> None:
+    def __init__(self, config: AppConfig | None = None, controller: Controller | None = None) -> None:
         self.config = config if config is not None else AppConfig()
-        self.simulation = Simulation(self.config.seed, self.config.world, self.config.life)
+        if controller is None and self.config.controller == "neural":
+            from eidolon.neural_controller import NeuralController
+
+            controller = NeuralController.from_seed(self.config.seed)
+        self.simulation = Simulation(self.config.seed, self.config.world, self.config.life, controller)
 
     def _pointer_event(self, event, size: tuple[int, int]) -> None:
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:

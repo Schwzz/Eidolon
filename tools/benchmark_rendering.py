@@ -15,10 +15,14 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--seed", type=int, default=17)
+    parser.add_argument("--controller", choices=("rules", "neural"), default="rules")
+    parser.add_argument("--network-seed", type=int, help="initialization seed for neural comparisons")
     parser.add_argument("--scale", type=float, default=1.0, help="Initial biological growth scale (1.0–1.6)")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--interaction", action="store_true", help="Exercise repeated pulling and fragment recovery")
     args = parser.parse_args()
+    if args.network_seed is not None and args.controller != "neural":
+        parser.error("--network-seed requires --controller neural")
     if args.frames <= 0:
         parser.error("--frames must be positive")
     if args.headless:
@@ -33,7 +37,7 @@ def main() -> None:
     from eidolon.simulation import Simulation
 
     try:
-        config = AppConfig(width=args.width, height=args.height, seed=args.seed)
+        config = AppConfig(width=args.width, height=args.height, seed=args.seed, controller=args.controller)
     except ValueError as error:
         parser.error(str(error))
     if not isfinite(args.scale) or not 1 <= args.scale <= config.life.max_scale:
@@ -46,7 +50,12 @@ def main() -> None:
         surface = pygame.display.set_mode((config.width, config.height))
         pygame.display.set_caption("EIDOLON rendering benchmark")
         renderer = ChamberRenderer()
-        simulation = Simulation(config.seed, config.world, config.life)
+        controller = None
+        if config.controller == "neural":
+            from eidolon.neural_controller import NeuralController
+
+            controller = NeuralController.from_seed(config.seed if args.network_seed is None else args.network_seed)
+        simulation = Simulation(config.seed, config.world, config.life, controller)
         simulation.life.body_scale = args.scale
         simulation.colony.set_growth(args.scale)
         peak_components = 1
@@ -86,6 +95,7 @@ def main() -> None:
             "video_driver": pygame.display.get_driver(),
             "resolution": list(surface.get_size()),
             "seed": config.seed,
+            "controller": simulation.controller_name,
             "initial_scale": args.scale,
             "nodes": len(simulation.colony.nodes),
             "visual_grains": len(renderer._colony_renderer._grains),
