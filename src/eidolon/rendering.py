@@ -1,6 +1,9 @@
-"""Pygame presentation for the empty simulation chamber."""
+"""Chamber layout and controls; organism drawing has its own renderer."""
 
 import pygame
+
+from eidolon.organism_rendering import SymbioteRenderer
+from eidolon.simulation import Simulation
 
 
 class ChamberRenderer:
@@ -14,26 +17,48 @@ class ChamberRenderer:
     def __init__(self) -> None:
         # Pygame's bundled font avoids external assets and platform font paths.
         self._title_font = pygame.font.Font(None, 32)
+        self._title = self._title_font.render("EIDOLON", True, self.TEXT)
         self._label_font = pygame.font.Font(None, 20)
+        self._organism_renderer = SymbioteRenderer()
+        self._labels: dict[tuple[str, tuple[int, int, int]], pygame.Surface] = {}
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def _label(self, text: str, color: tuple[int, int, int]) -> pygame.Surface:
+        key = (text, color)
+        if key not in self._labels:
+            self._labels[key] = self._label_font.render(text, True, color)
+        return self._labels[key]
+
+    def draw(
+        self, surface: pygame.Surface, simulation: Simulation | None = None,
+        alpha: float = 1.0,
+    ) -> None:
         """Recompute layout from the current window size on every frame."""
         width, height = surface.get_size()
         surface.fill(self.BACKGROUND)
-        surface.blit(self._title_font.render("EIDOLON", True, self.TEXT), (24, 19))
+        surface.blit(self._title, (24, 19))
         surface.blit(
-            self._label_font.render("SIMULATION CHAMBER", True, self.MUTED), (24, 50)
+            self._label("SIMULATION CHAMBER", self.MUTED), (24, 50)
         )
-        phase = self._label_font.render("PHASE 0", True, self.ACCENT)
+        phase = self._label("PHASE 1A", self.ACCENT)
         surface.blit(phase, (width - phase.get_width() - 24, 29))
 
         chamber = pygame.Rect(24, 82, max(1, width - 48), max(1, height - 128))
         pygame.draw.rect(surface, self.CHAMBER, chamber, border_radius=10)
         pygame.draw.rect(surface, self.BORDER, chamber, width=1, border_radius=10)
 
-        surface.blit(
-            self._label_font.render("EMPTY CHAMBER", True, self.MUTED),
-            (24, height - 29),
-        )
-        hint = self._label_font.render("ESC  Exit", True, self.MUTED)
+        if simulation is not None:
+            self._organism_renderer.draw(
+                surface, chamber, simulation.organism, 1.0 if simulation.paused else alpha,
+            )
+            appearance = simulation.organism.appearance
+            specimen = f"SEED {appearance.seed}   /   {len(appearance.tendrils)} TENDRILS"
+            status = f"{'PAUSED' if simulation.paused else 'LIVE'}  {simulation.animation_speed:.2f}x"
+            surface.blit(self._label(specimen, self.MUTED), (40, height - 68))
+            status_label = self._label(status, self.ACCENT)
+            surface.blit(status_label, (width - status_label.get_width() - 40, height - 68))
+            controls = "SPACE Pause   R Reset   -/+ Speed"
+        else:
+            controls = "EMPTY CHAMBER"
+        surface.blit(self._label(controls, self.MUTED), (24, height - 29))
+        hint = self._label("ESC  Exit", self.MUTED)
         surface.blit(hint, (width - hint.get_width() - 24, height - 29))

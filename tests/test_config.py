@@ -16,6 +16,7 @@ def test_defaults_and_uncapped_rendering() -> None:
         {"max_fps": -1}, {"max_fps": True}, {"simulation_hz": 0},
         {"max_frame_seconds": 0}, {"max_frame_seconds": float("nan")},
         {"max_frame_seconds": float("inf")}, {"max_updates_per_frame": 0},
+        {"seed": 1.5}, {"seed": True},
     ],
 )
 def test_reject_invalid_settings(settings) -> None:

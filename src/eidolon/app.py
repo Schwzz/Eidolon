@@ -13,12 +13,12 @@ from eidolon.timing import FixedStepClock
 class Application:
     def __init__(self, config: AppConfig | None = None) -> None:
         self.config = config if config is not None else AppConfig()
-        self.simulation = Simulation()
+        self.simulation = Simulation(self.config.seed)
 
     def run(self) -> None:
         """Run until the window closes or Escape is pressed; always release SDL."""
         try:
-            # No audio is needed in Phase 0; avoid initializing unused subsystems.
+            # Avoid initializing unused audio subsystems.
             pygame.display.init()
             pygame.font.init()
             surface = pygame.display.set_mode(
@@ -35,8 +35,21 @@ class Application:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         running = False
-                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                        running = False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            running = False
+                        elif event.key == pygame.K_SPACE:
+                            self.simulation.paused = not self.simulation.paused
+                        elif event.key == pygame.K_r:
+                            self.simulation.reset()
+                        elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                            self.simulation.set_animation_speed(
+                                max(0.25, self.simulation.animation_speed - 0.25)
+                            )
+                        elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
+                            self.simulation.set_animation_speed(
+                                min(2.0, self.simulation.animation_speed + 0.25)
+                            )
                     elif event.type == pygame.VIDEORESIZE:
                         surface = pygame.display.set_mode(
                             (
@@ -51,7 +64,7 @@ class Application:
                 now = perf_counter()
                 simulation_clock.advance(now - previous_time, self.simulation.update)
                 previous_time = now
-                renderer.draw(surface)
+                renderer.draw(surface, self.simulation, simulation_clock.interpolation_alpha)
                 pygame.display.flip()
                 frame_limiter.tick(self.config.max_fps)
         finally:

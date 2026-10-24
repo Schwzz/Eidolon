@@ -10,15 +10,16 @@ MIN_WINDOW_HEIGHT = 320
 
 @dataclass(frozen=True, slots=True)
 class AppConfig:
-    width: int = 1100
+    width: int = 1280
     height: int = 720
     max_fps: int = 60  # Zero means uncapped rendering.
     simulation_hz: int = 60
     max_frame_seconds: float = 0.25
     max_updates_per_frame: int = 8
+    seed: int = 17
 
     def __post_init__(self) -> None:
-        for name in ("width", "height", "max_fps", "simulation_hz", "max_updates_per_frame"):
+        for name in ("width", "height", "max_fps", "simulation_hz", "max_updates_per_frame", "seed"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError(f"{name} must be an integer")

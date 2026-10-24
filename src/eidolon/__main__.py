@@ -15,13 +15,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Open the EIDOLON simulation chamber.")
     parser.add_argument("--width", type=int, default=defaults.width, help="window width")
     parser.add_argument("--height", type=int, default=defaults.height, help="window height")
+    parser.add_argument("--seed", type=int, default=defaults.seed, help="specimen appearance seed (default: 17)")
     parser.add_argument(
         "--max-fps", type=int, default=defaults.max_fps,
         help="render frame limit (default: 60; 0: uncapped)",
     )
     args = parser.parse_args(argv)
     try:
-        config = AppConfig(width=args.width, height=args.height, max_fps=args.max_fps)
+        config = AppConfig(width=args.width, height=args.height, max_fps=args.max_fps, seed=args.seed)
     except ValueError as error:
         parser.error(str(error))
     try:

@@ -26,8 +26,10 @@ def test_retains_fractional_time_between_frames() -> None:
     clock = FixedStepClock(AppConfig())
     steps = []
     assert clock.advance(1 / 120, steps.append) == 0
+    assert clock.interpolation_alpha == pytest.approx(0.5)
     assert clock.advance(1 / 120, steps.append) == 1
     assert steps == [1 / 60]
+    assert clock.interpolation_alpha == pytest.approx(0)
 
 
 def test_catch_up_is_bounded_and_excess_backlog_is_dropped() -> None:

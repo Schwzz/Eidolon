@@ -13,6 +13,11 @@ class FixedStepClock:
         self._max_updates = config.max_updates_per_frame
         self._accumulator = 0.0
 
+    @property
+    def interpolation_alpha(self) -> float:
+        """Fraction toward the next fixed step, for read-only visual interpolation."""
+        return min(1.0, self._accumulator / self.step_seconds)
+
     def advance(self, elapsed: float, update: Callable[[float], None]) -> int:
         """Run due steps, bounding catch-up work after a stall.
 
