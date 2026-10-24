@@ -1,7 +1,7 @@
 """Replaceable, stateless survival decisions over immutable sensory snapshots."""
 
 from dataclasses import dataclass
-from math import atan2, cos, sin
+from math import atan2, cos, pi, sin
 from typing import Protocol
 
 from eidolon.world import Food
@@ -19,6 +19,7 @@ class Senses:
     speed: float = 0.0
     speed_reference: float = 55.0
     sensing_radius: float = 250.0
+    grounded_world: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +42,8 @@ class SurvivalRules:
         x, y = senses.position
         if senses.food is not None:
             target = senses.food.position
+            if senses.grounded_world:
+                return Decision(0.0 if target[0] >= x else pi)
             return Decision(atan2(target[1] - y, target[0] - x))
         # A smooth wandering heading; wall repulsion steers before contact.
         angle = senses.direction + 0.65 * sin(senses.age * 0.7 + self.phase)
@@ -50,4 +53,6 @@ class SurvivalRules:
         reach = senses.clearance + 80.0
         vx += max(0.0, (reach - x) / 80) - max(0.0, (x - (width - reach)) / 80)
         vy += max(0.0, (reach - y) / 80) - max(0.0, (y - (height - reach)) / 80)
+        if senses.grounded_world:
+            vy = 0.0
         return Decision(atan2(vy, vx))

@@ -1,11 +1,11 @@
 """Fixed-step coordination of a world, biology, rules, and presentation clocks."""
 
-from math import atan2, ceil, cos, hypot, isfinite, sin, tau
+from math import atan2, ceil, cos, hypot, isfinite, pi, sin, tau
 
 from eidolon.behavior import Controller, Senses, SurvivalRules
 from eidolon.biology import LifeState, SPRITE_EXTENT
-from eidolon.config import LifeConfig, WorldConfig
-from eidolon.colony import Colony
+from eidolon.config import LifeConfig, PhysicsConfig, WorldConfig
+from eidolon.colony import Colony, MEMBRANE_RADIUS
 from eidolon.organism import Symbiote
 from eidolon.world import World
 
@@ -16,10 +16,12 @@ class Simulation:
     def __init__(
         self, seed: int = 17, world_config: WorldConfig | None = None,
         life_config: LifeConfig | None = None, controller: Controller | None = None,
+        physics_config: PhysicsConfig | None = None,
     ) -> None:
         self.seed = seed
         self.world_config = world_config if world_config is not None else WorldConfig()
         self.life_config = life_config if life_config is not None else LifeConfig()
+        self.physics_config = physics_config if physics_config is not None else PhysicsConfig()
         self.controller = controller if controller is not None else SurvivalRules(seed)
         self.organism = Symbiote(seed)  # Appearance/animation; no biological data.
         self._paused = False
@@ -39,6 +41,7 @@ class Simulation:
             self.life.begin_step()
             self.colony.release_grab()
             self.colony.begin_step()
+            self.world.begin_step()
             self.organism.update(0.0)
 
     @property
@@ -53,13 +56,16 @@ class Simulation:
         """Recreate the whole seeded world, preserving pause and speed controls."""
         settings = self.life_config
         margin = settings.base_radius * settings.max_scale * SPRITE_EXTENT + self.world_config.food_radius
-        self.world = World(self.world_config, self.seed, margin)
+        self.world = World(self.world_config, self.seed, margin, self.physics_config)
         self.life = LifeState(
             (self.world_config.width / 2, self.world_config.height / 2),
             (self.seed % 65536) * 0.61803398875 % tau,
             settings.base_radius, settings.initial_energy, settings.max_energy,
         )
-        self.colony = Colony(self.seed, self.life.position, settings.base_radius)
+        self.colony = Colony(self.seed, self.life.position, settings.base_radius, self.physics_config)
+        bottom = max(node.position[1] + node.radius * MEMBRANE_RADIUS for node in self.colony.nodes)
+        self.colony.translate_to((self.world_config.width / 2,
+                                  self.colony.center[1] + self.world_config.height - bottom - 2.0))
         self.life.position = self.colony.center
         self.life.begin_step()
         self.steps = 0
@@ -108,9 +114,9 @@ class Simulation:
         self.steps += 1
         elapsed = dt * self.speed
         was_alive = self.life.alive
-        if was_alive:
-            self.life.begin_step()
-            self.colony.begin_step()
+        self.life.begin_step()
+        self.colony.begin_step()
+        self.world.begin_step()
         age_before = self.life.age_seconds
         # Keep movement/feeding stable for larger caller timesteps and at 2x.
         count = max(1, ceil(elapsed / self.MAX_STEP - 1e-9))
@@ -136,11 +142,11 @@ class Simulation:
         self.world.advance(dt)
         state, settings = self.life, self.life_config
         if not state.alive:
-            self.colony.freeze()
+            self._advance_dead(dt)
             return
         if state.energy <= 1e-10:
             state.die()
-            self.colony.freeze()
+            self._advance_dead(dt)
             return
         self._eat()
         sensed_food = self.world.nearest_food(state.position, settings.sensing_radius)
@@ -149,6 +155,7 @@ class Simulation:
             state.energy / state.max_energy, state.collision_radius,
             (self.world_config.width, self.world_config.height), sensed_food,
             speed=state.speed, speed_reference=settings.movement_speed, sensing_radius=settings.sensing_radius,
+            grounded_world=True,
         ))
         if not isfinite(decision.direction) or not isfinite(decision.speed_fraction):
             raise ValueError("controller decisions must be finite")
@@ -162,22 +169,22 @@ class Simulation:
         # Membership changes can move a centroid without moving any material.
         # Charge actual primary-component motion, not that bookkeeping jump.
         traveled = hypot(*displacement)
-        if self.colony.wall_contacts and speed > 0 and traveled < speed * dt * 0.2:
-            state.direction = atan2(self.world_config.height / 2 - state.position[1],
-                                    self.world_config.width / 2 - state.position[0]) % tau
+        if self.colony.side_contacts and speed > 0 and abs(displacement[0]) < speed * dt * 0.2:
+            state.direction = 0.0 if state.position[0] < self.world_config.width / 2 else pi
         state.age_seconds += dt
         state.energy = max(0.0, state.energy - settings.metabolism * state.body_scale**2 * dt
                            - settings.movement_cost * traveled)
         if state.energy <= 1e-10:
             state.die()
-            self.colony.freeze()
+            self.colony.release_grab()
+            state.velocity = self.colony.velocity
             return
         self._eat()
         target_scale = min(settings.max_scale, 1 + state.nutrition / settings.nutrition_per_scale)
         # Growth waits for enough space instead of pushing or teleporting the
         # organism through a wall; food is spawned inside this reachable region.
         x, y = state.position
-        available_radius = min(x, y, self.world_config.width - x, self.world_config.height - y)
+        available_radius = min(x, y, self.world_config.width - x)
         target_scale = min(target_scale, available_radius / (settings.base_radius * SPRITE_EXTENT))
         reserve = state.max_energy * settings.growth_energy_threshold
         if state.energy > reserve and state.body_scale < target_scale:
@@ -185,8 +192,18 @@ class Simulation:
             if settings.growth_energy_cost > 0:
                 growth = min(growth, (state.energy - reserve) / settings.growth_energy_cost)
             state.body_scale += growth
-            self.colony.set_growth(state.body_scale)
+            self.colony.set_growth(state.body_scale, (self.world_config.width, self.world_config.height))
+            state.position = self.colony.center
             state.energy -= growth * settings.growth_energy_cost
             if state.energy <= 1e-10:
                 state.die()
-                self.colony.freeze()
+                self.colony.release_grab()
+                state.velocity = self.colony.velocity
+
+    def _advance_dead(self, dt: float) -> None:
+        """Biology stops at death, while the body remains a passive physical object."""
+        self.colony.release_grab()
+        displacement = self.colony.advance(dt, (0.0, 0.0),
+                                           (self.world_config.width, self.world_config.height), active=False)
+        self.life.position = self.colony.center
+        self.life.velocity = tuple(value / dt for value in displacement)

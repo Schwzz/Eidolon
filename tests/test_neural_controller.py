@@ -112,7 +112,7 @@ def test_inference_runs_once_per_simulation_substep_and_never_while_paused_dead_
         before = snapshot(simulation)
         renderer.draw(pygame.Surface(size), simulation)
         assert snapshot(simulation) == before
-    assert ("PHASE 2A | NEURAL", renderer.ACCENT) in renderer._labels
+    assert ("PHASE 2A.1 | NEURAL", renderer.ACCENT) in renderer._labels
     assert len(calls) == 4
     simulation.paused = False
     simulation.life.energy = 0
@@ -135,7 +135,8 @@ def test_neural_motion_feeding_growth_and_starvation_use_existing_survival_syste
                           life_config=LifeConfig(initial_energy=1, metabolism=4))
     starving.update(1)
     assert not starving.life.alive and starving.life.energy == 0
-    assert all(node.velocity == (0, 0) for node in starving.colony.nodes)
+    assert starving.colony.elapsed_seconds > 0
+    assert np.isfinite([node.velocity for node in starving.colony.nodes]).all()
 
 
 def test_loaded_network_survives_restart_and_repeats_trajectory(tmp_path) -> None:

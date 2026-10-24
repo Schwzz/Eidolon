@@ -5,7 +5,7 @@ from math import hypot, isfinite
 import pytest
 
 from eidolon.colony import Colony, MEMBRANE_RADIUS
-from eidolon.config import AppConfig, LifeConfig, WorldConfig
+from eidolon.config import AppConfig, LifeConfig, PhysicsConfig, WorldConfig
 from eidolon.simulation import Simulation
 from eidolon.timing import FixedStepClock
 
@@ -18,6 +18,11 @@ def state(colony):
 
 
 def start_pull(colony):
+    if colony.floor_contacts == 0 and len(colony.components) == 1:
+        bottom = max(node.position[1] + node.radius * MEMBRANE_RADIUS for node in colony.nodes)
+        colony.translate_to((colony.center[0], colony.center[1] + 799 - bottom))
+        for _ in range(360):
+            colony.advance(1 / 120, (0, 0), (1200, 800), active=False)
     node = max(colony.nodes, key=lambda candidate: candidate.position[0])
     origin = node.position
     assert colony.begin_grab(origin) == node.identifier
@@ -136,7 +141,7 @@ def test_connected_components_and_triangles_follow_graph_edits() -> None:
 
 
 def test_multinode_fragment_moves_toward_and_reconnects_with_largest_component() -> None:
-    colony = Colony(17, (600, 400), 24)
+    colony = Colony(17, (600, 755), 24)
     fragment_count = len(colony.nodes) // 2 - 1
     smaller = set(sorted(range(len(colony.nodes)), key=lambda index: colony.nodes[index].position[0])[:fragment_count])
     colony.bonds = [bond for bond in colony.bonds if (bond.first in smaller) == (bond.second in smaller)]
@@ -161,7 +166,8 @@ def test_multinode_fragment_moves_toward_and_reconnects_with_largest_component()
 
 def test_component_membership_change_does_not_spend_energy_for_a_centroid_jump() -> None:
     simulation = Simulation(world_config=WorldConfig(initial_food=0, regeneration_interval=0),
-                            life_config=LifeConfig(metabolism=0, movement_speed=0, movement_cost=100, growth_rate=0))
+                            life_config=LifeConfig(metabolism=0, movement_speed=0, movement_cost=100, growth_rate=0),
+                            physics_config=PhysicsConfig(gravity=0, propulsion_enabled=False))
     node = max(simulation.colony.nodes, key=lambda candidate: candidate.position[0])
     simulation.colony.bonds = [bond for bond in simulation.colony.bonds if node.identifier not in (bond.first, bond.second)]
     simulation.colony.rebuild_topology()
@@ -232,7 +238,8 @@ def test_pause_restart_and_death_cancel_grabs_and_preserve_single_colony() -> No
     simulation.update(1 / 60)
     assert simulation.colony.grab is None and not simulation.life.alive
     assert simulation.begin_grab(simulation.colony.nodes[0].position) is None
-    assert all(node.velocity == (0, 0) for node in simulation.colony.nodes)
+    assert simulation.colony.elapsed_seconds > 0  # Gravity continues after decisions stop.
+    assert all(isfinite(value) for node in simulation.colony.nodes for value in node.velocity)
 
 
 def test_far_pointer_targets_remain_force_velocity_and_boundary_limited() -> None:

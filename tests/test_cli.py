@@ -76,3 +76,12 @@ def test_runtime_numeric_failure_is_reported_without_a_traceback(monkeypatch, ca
     monkeypatch.setattr("eidolon.__main__.Application.run", fail)
     assert main(["--controller", "neural"]) == 1
     assert "EIDOLON could not run: network inference overflowed" in capsys.readouterr().err
+
+
+def test_cli_can_configure_gravity_friction_and_passive_physics(monkeypatch) -> None:
+    apps = []
+    monkeypatch.setattr("eidolon.__main__.Application.run", lambda app: apps.append(app))
+    assert main(["--gravity", "90", "--floor-friction", "0.8", "--no-propulsion"]) == 0
+    settings = apps[0].simulation.physics_config
+    assert settings.gravity == 90 and settings.floor_friction == 0.8 and not settings.propulsion_enabled
+    assert apps[0].simulation.colony.physics is settings and apps[0].simulation.world.physics is settings

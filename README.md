@@ -1,15 +1,18 @@
 # EIDOLON
 
-An experimental artificial-life sandbox for Windows desktop. **Phase 2A:
-Neural Network From Scratch** adds an optional, seeded NumPy feedforward controller.
-The existing survival rules remain the default. The biomass appearance, physics,
-grabbing, tearing/reconnection, food, energy, growth, starvation, and fixed world
-are preserved.
+An experimental artificial-life sandbox for Windows desktop. **Phase 2A.1:
+Grounded Physics Foundation** makes the chamber a gravity-based 2D side view.
+Biomass and food fall, collide with the floor, and settle. The existing survival
+rules remain the default, and the seeded NumPy neural controller is retained.
+The biomass appearance, grabbing, tearing/reconnection, energy, growth,
+starvation, fixed world, and model format remain.
 
 There is no training, learning, memory, evolution, reproduction, or second
 organism. Neural weights are initially random; neural mode is an experiment,
 not a trained survival policy. No ML frameworks, pretrained models, LLMs, cloud
 APIs, credentials, or network connection are required after installation.
+No muscle actuators, reaching/gripping, rewards, or reinforcement learning are
+implemented in this phase.
 
 ## Windows setup (PowerShell)
 
@@ -97,9 +100,13 @@ Inputs have this fixed order:
 | 11 | Food detected | 1 if the sensory snapshot contains food, otherwise 0 |
 
 Output 0 requests steering relative to current heading (`output × π` radians).
-Output 1 sets effort (`(output + 1) / 2`). Existing turn-rate limits, acceleration,
-energy costs, particle constraints, and wall contacts determine the physical
-response. Rules still use their existing food-seeking and wandering code.
+Output 1 sets effort (`(output + 1) / 2`). Existing turn-rate limits determine
+heading; the horizontal component of requested movement drives floor traction.
+The controller cannot apply upward force or propel airborne tissue. Energy
+costs, particle constraints, gravity, and contacts determine the response. Rules
+seek food horizontally and wander between the side walls, ignoring floor/ceiling
+repulsion that previously steered them vertically. Saved networks keep the same
+12 inputs, two outputs, and version-1 JSON format.
 Neural mode can circle, ignore food, or starve; it receives no rule-based rescue.
 
 The controller is evaluated **once per live simulation integration step** (normally
@@ -142,6 +149,70 @@ parameters = restored.to_parameters()
 copied = FeedForwardNetwork.from_parameters(parameters)
 ```
 
+## Grounded physics and passive episodes
+
+World **+Y points downward**. The default floor is the bottom boundary at
+`world.height`; the default world remains 1200 × 800 units. Seeded tissue starts
+two units above floor contact and settles, rather than spawning in the middle
+of the chamber. The fit camera and resizing affect only the view.
+
+`PhysicsConfig` is shared by the world and colony. Defaults:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `gravity` | 180 | Downward acceleration in world units/second², independent of mass |
+| `floor_friction` | 0.55 | Floor friction coefficient |
+| `linear_damping` | 0.8 | Exponential damping per second |
+| `max_speed` | 220 | Food speed cap; node cap is this value × √growth scale |
+| `contact_slop` | 0.5 | Small floor-support tolerance in world units |
+| `drive_acceleration` | 240 | Maximum compatibility-drive acceleration |
+| `propulsion_enabled` | `True` | Enable compatibility traction, fragment homing, and automatic rest-length waves |
+
+Gravity, contacts, friction, and elastic constraints run at substeps of at most
+1/120 second. Floor projection prevents penetration; downward contact velocity
+is removed with no collision restitution. Particle friction uses the normal
+contact correction to limit tangential movement. Mass-weighted springs and
+relative damping let the tissue compress and relax instead of holding a rigid
+pose. Soft tissue may rebound elastically, but the controller has no flight force.
+
+`locomotion.py` isolates compatibility propulsion: horizontal force is applied
+only through supporting nodes and is limited and distributed over floor contacts.
+Neighboring tissue follows through elastic bonds. Recovery similarly targets
+floor-supporting tissue instead of trying to levitate toward elevated nodes.
+Grabbing remains an external force and can lift tissue while held.
+
+```powershell
+.\.venv\Scripts\python.exe -m eidolon --gravity 180 --floor-friction 0.55
+.\.venv\Scripts\python.exe -m eidolon --no-propulsion
+.\.venv\Scripts\python.exe -m eidolon --controller neural --no-propulsion
+```
+
+`--no-propulsion` disables traction, assisted fragment travel, and automatic
+breathing/traveling bond waves completely. Gravity, damping, elastic recovery,
+contacts, grabbing/tearing, and nearby material reconnection remain. This is a
+passive-physics switch for future controllers; it does not add muscles or training.
+Public node IDs, positions, velocities, masses, adjacency, and bond rest lengths/
+compliance remain available for future local actuation work.
+
+The headless API needs no graphics or training framework:
+
+```python
+from eidolon.config import PhysicsConfig
+from eidolon.simulation import Simulation
+
+simulation = Simulation(seed=17, physics_config=PhysicsConfig(
+    gravity=180, floor_friction=0.55, propulsion_enabled=False,
+))
+for _ in range(600):
+    simulation.update(1 / 60)
+simulation.reset()  # Same initial tissue, food positions/velocities, clocks, and RNG state.
+```
+
+These are simplified world-unit dynamics, not a calibrated material model.
+There is currently one flat floor and no obstacles. Food collides with world
+walls/floor; food–food and food–tissue pushing contacts are not implemented.
+Consumption still uses the existing feeding interaction range.
+
 ## Living biomass physics
 
 `colony.py` owns particle positions/velocities/masses/radii, stable node IDs,
@@ -171,7 +242,7 @@ The solver uses velocity prediction followed by **XPBD-style distance constraint
   Nonfinite input/state raises an error rather than silently reseeding.
 
 The active controller requests a movement direction/speed. This becomes traction
-on individual particles, stronger at the leading edge. Neighboring particles
+on supporting particles only. Neighboring particles
 follow through the bonds with different velocities and small delays. There is no
 rigid translation or prescribed sprite rotation during locomotion. Modest
 traveling rest-length contractions (up to 6.5% when moving) and a 1.5% idle pulse
@@ -181,7 +252,8 @@ Biological position is the mass-weighted centroid of the largest component
 (ties use the lowest node ID). Movement energy uses its material displacement rather
 than centroid jumps when membership changes. Growth changes node radii and bond rest-length targets;
 nodes relax toward the expanded shape instead of being instantly rescaled. Node
-count remains constant. Death freezes all nodes and stops decisions/feeding.
+count remains constant. Death stops decisions/feeding and switches the body to
+passive dynamics, so an airborne corpse falls rather than freezing in place.
 
 ## Grabbing, tearing, and recovery
 
@@ -193,12 +265,15 @@ Controller braking is disabled on a held component, allowing the spring to pull
 material gradually instead of fighting the entire colony's locomotion forces.
 
 Only bonds incident to the held node can tear. Both sustained strong pulling
-(at least **1,800 × scale** force) and **18% tensile strain for 0.12 simulation
+(at least **4,500 × scale** force) and **18% tensile strain for 0.12 simulation
 seconds** are required. At most one bond breaks every 0.05 seconds. Brief pointer
-jumps and ordinary locomotion do not cause uncontrolled cascades.
+jumps and ordinary locomotion do not cause uncontrolled cascades. The force
+threshold accounts for the new floor load and friction during gentle pulling.
 
 Unheld fragments seek the nearest part of the largest component. The main
-component slows while fragments recover. Contact capture reaches 1.65 node
+component slows while fragments recover. Horizontal travel requires floor
+support; released airborne fragments fall before traveling along the floor.
+Contact capture reaches 1.65 node
 spacings and uses velocity damping instead of rejecting fast contact. Healing
 waits for pointer release and a **0.45-second simulation-time tear cooldown**.
 It adds multiple local bonds where neighbors are available, with at most eight
@@ -227,6 +302,12 @@ Food appears as small green dots: initially 32, with a default cap of 64 and one
 regenerated every three simulation seconds. A full world discards missed spawns.
 Each resource is consumed once and provides 18 energy/nutrition units. Spawn
 clearance remains conservative so food stays accessible at maximum growth.
+Resources have persistent position, velocity, radius, and mass (default 1,
+configurable with `WorldConfig.food_mass`). They fall from the seeded spawn
+region, land at `world.height - radius`, lose lateral speed through friction,
+and sleep when stationary on the floor. Rendering interpolates previous/current
+food positions without changing the physics. Equal masses are not required for
+equal free-fall acceleration.
 
 The organism senses food within 250 units of its centroid and eats within a
 34-unit interaction radius scaled by growth, plus food radius. In rules mode, without food it
@@ -239,11 +320,15 @@ Energy starts at 70/100. Metabolism costs `1 × scale²` per second; movement co
 0.025 energy per world unit actually traveled. Eating restores energy up to the
 maximum and accumulates nutrition. Growth requires energy above 45%, proceeds at
 at most 0.01 scale units/second, spends energy, and stops at 1.6×. Conservative
-clearance also limits growth near walls. `health` remains energy-derived vitality
+clearance also limits growth near side walls and the ceiling. Floor contact does
+not block growth: radii and rest lengths expand while the floor supports the
+body, allowing it to grow upward. `health` remains energy-derived vitality
 (0–100), not an independent injury model.
 
-At zero energy the colony dies: age, physics, and feeding freeze. The world may
-continue regenerating food. Pause freezes every simulation system and random
+At zero energy the colony dies: age, growth, decisions, and feeding stop. Tissue
+continues passive gravity/contact/elasticity; automatic gait, propulsion,
+grabbing, and fragment recovery stop. Food continues falling and regenerating.
+Pause freezes every simulation system and random
 state; restart regenerates the original graph and resource supply. Speed affects
 every system, including physics and regeneration. Render interpolation uses the
 previous/current node positions captured at each fixed simulation update.
@@ -299,6 +384,7 @@ light stamps are reused, and HUD label caching remains bounded.
 .\.venv\Scripts\python.exe tools\benchmark_neural.py --iterations 20000
 .\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --interaction
 .\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --interaction --scale 1.6
+.\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --no-propulsion
 .\.venv\Scripts\python.exe tools\stress_colony.py --seed 17 --cycles 6 --scale 1.6
 ```
 
@@ -310,25 +396,29 @@ not measure native Windows presentation or guarantee performance on target hardw
 The display-free stress tool checks repeated tearing/recovery, identity and mass
 conservation, bond accounting, neighbor limits, walls, and finite/capped velocities.
 
-Phase 2A validation: **307 tests passed on Python 3.12 and 3.14**. The default
-12→16→2 network averaged **9.88 µs per forward pass** and **13.73 µs per complete
+Phase 2A.1 validation: **332 tests passed on Python 3.12 and 3.14**. The default
+12→16→2 network averaged **8.42 µs per forward pass** and **13.33 µs per complete
 decision**, including normalization and validation, over 20,000 iterations.
 Linux / Python 3.14.8 / NumPy 2.5.4 / SDL dummy measurements at 1280 × 720
 (600 measured frames after 60 warmup frames per run):
 
-| Controller | World seed | Scenario | Mean ms/frame | p95 ms/frame |
-| --- | --- | --- | --- | --- |
-| Rules | 17 | Normal | 5.760 | 6.302 |
-| Neural | 17 | Normal | 6.079 | 7.322 |
-| Rules | 42 | Normal | 4.954 | 5.734 |
-| Neural | 42 | Normal | 5.497 | 6.193 |
-| Neural | 17 | Pulling and recovery | 6.274 | 7.413 |
-| Neural | 17 | Pulling and recovery, 1.6× growth | 6.311 | 7.118 |
+| Controller | World seed | Scenario | Mean ms/frame | p95 ms/frame | Max ms/frame |
+| --- | --- | --- | --- | --- | --- |
+| Rules | 17 | Grounded | 6.395 | 7.849 | 12.611 |
+| Neural | 17 | Grounded | 6.419 | 6.928 | 10.649 |
+| Rules | 42 | Grounded | 5.473 | 6.240 | 8.885 |
+| Neural | 42 | Grounded | 5.666 | 6.366 | 9.348 |
+| Rules | 17 | Pulling/recovery, 1.6× growth | 6.925 | 8.465 | 20.279 |
+| Neural | 17 | Pulling/recovery, 1.6× growth | 6.656 | 7.525 | 45.003 |
+| Rules | 17 | Propulsion disabled | 6.905 | 8.014 | 12.992 |
 
 These are cloud measurements, not native Windows or Iris Xe verification.
-The unchanged biomass solver's Phase 1C-C stress checks completed 27 recovery
-cycles over 553.5 simulation seconds, including 1.6× growth, without lost nodes
-or limit violations; all its automated regression tests also pass in Phase 2A.
+Average/p95 timings are below the 16.67 ms frame budget, but isolated cloud
+spikes reached 45 ms; native 60 FPS responsiveness still needs Windows testing.
+Grounded stress checks completed **18 recovery cycles over 369 simulation
+seconds** across three seeds, including 1.6× growth, without lost nodes or
+force/velocity/boundary/neighbor-limit violations. Node identity, mass, and bond
+accounting remained intact.
 
 Tests cover seeded connected graphs, force propagation, stretch/recovery,
 self-collision, walls, timestep subdivision, growth, deterministic trajectories,
@@ -348,6 +438,10 @@ Neural tests check a hand-calculated forward pass, initialization, normalization
 invalid parameters/files, exact JSON round trips, controller/CLI selection,
 unchanged survival mechanics, pause/death, restart, and fixed-step reproducibility
 at different rendering rates. Drawing does not call the network.
+Grounded checks cover configurable mass-independent gravity, no flight forces,
+passive settling, floor traction/friction, physical food and collisions,
+interpolation, grounded growth, passive corpses, deterministic episode resets,
+and a subprocess that runs the rules/physics core without Pygame or NumPy.
 
 GitHub Actions covers Python 3.11–3.14 on Linux/Windows. Configuring CI does not
 establish that it has run. Native Windows graphical compatibility and Iris Xe
@@ -369,6 +463,7 @@ src/eidolon/
   colony.py            Nodes, bonds, constraints, damping, and collisions
   interaction.py       Force-limited pointer constraint, without display dependencies
   spatial.py           Deterministic local neighbor grid
+  locomotion.py        Switchable, floor-only compatibility propulsion
   colony_rendering.py  Flat membrane from physical node positions
   biology.py           Colony-wide biological state
   behavior.py          Replaceable sensory/decision interface and survival rules
@@ -394,6 +489,6 @@ python3 -m venv .venv
 ```
 
 This is a simplified 2D elastic graph, not a continuum fluid or a biological
-material model. Recovery can be interrupted by death; dead tissue freezes rather
-than continuing to reconnect. Learning and evolution remain outside this milestone.
-**Phase 2B has not been started.**
+material model. Recovery can be interrupted by death; dead tissue settles
+passively rather than continuing to reconnect. Learning and evolution remain
+outside this milestone. **Phase 2A.2 has not been started.**

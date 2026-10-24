@@ -48,7 +48,7 @@ class ChamberRenderer:
         surface.blit(
             self._label("SIMULATION CHAMBER", self.MUTED), (24, 50)
         )
-        caption = "PHASE 2A" + (f" | {simulation.controller_name.upper()}" if simulation is not None else "")
+        caption = "PHASE 2A.1" + (f" | {simulation.controller_name.upper()}" if simulation is not None else "")
         phase = self._label(caption, self.ACCENT)
         surface.blit(phase, (width - phase.get_width() - 24, 29))
 
@@ -63,11 +63,11 @@ class ChamberRenderer:
             world_rect = pygame.Rect(*camera.offset, world.width * camera.scale, world.height * camera.scale)
             pygame.draw.rect(surface, (30, 44, 48), world_rect, width=1)
             for food in simulation.world.foods:
-                position = tuple(round(value) for value in camera.world_to_screen(food.position))
+                position = tuple(round(value) for value in camera.world_to_screen(food.sample(1.0 if simulation.paused else alpha)))
                 radius = max(1, round(food.radius * camera.scale))
                 pygame.draw.circle(surface, (36, 53, 39), position, radius + 2)
                 pygame.draw.circle(surface, (161, 191, 119), position, radius)
-            interpolation = 1.0 if simulation.paused or not simulation.life.alive else alpha
+            interpolation = 1.0 if simulation.paused else alpha
             self._colony_renderer.draw(
                 surface, world_rect, simulation.colony, camera,
                 simulation.organism.appearance, interpolation, simulation.organism.age_seconds,

@@ -7,7 +7,7 @@ import sys
 import pygame
 
 from eidolon.app import Application
-from eidolon.config import AppConfig
+from eidolon.config import AppConfig, PhysicsConfig
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -23,6 +23,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="neural hidden layer widths (default: 16)")
     parser.add_argument("--load-network", metavar="PATH", help="load neural parameters from UTF-8 JSON")
     parser.add_argument("--save-network", metavar="PATH", help="save neural parameters to JSON before launching")
+    parser.add_argument("--gravity", type=float, default=defaults.physics.gravity,
+                        help="downward world units/second squared (default: 180)")
+    parser.add_argument("--floor-friction", type=float, default=defaults.physics.floor_friction,
+                        help="nonnegative floor friction coefficient (default: 0.55)")
+    parser.add_argument("--no-propulsion", action="store_true", help="disable compatibility drive, homing, and automatic gait")
     parser.add_argument(
         "--max-fps", type=int, default=defaults.max_fps,
         help="render frame limit (default: 60; 0: uncapped)",
@@ -35,7 +40,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--load-network cannot be combined with --network-seed or --hidden-layers")
     try:
         config = AppConfig(width=args.width, height=args.height, max_fps=args.max_fps,
-                           seed=args.seed, controller=args.controller)
+                           seed=args.seed, controller=args.controller,
+                           physics=PhysicsConfig(gravity=args.gravity, floor_friction=args.floor_friction,
+                                                 propulsion_enabled=not args.no_propulsion))
         controller = None
         if args.controller == "neural":
             from eidolon.neural_controller import NeuralController

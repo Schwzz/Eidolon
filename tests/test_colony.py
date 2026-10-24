@@ -4,7 +4,7 @@ from math import cos, hypot, isfinite, sin
 import pytest
 
 from eidolon.colony import Colony, MEMBRANE_RADIUS
-from eidolon.config import LifeConfig, WorldConfig
+from eidolon.config import LifeConfig, PhysicsConfig, WorldConfig
 from eidolon.simulation import Simulation
 
 
@@ -46,7 +46,9 @@ def test_different_seeds_change_shape_and_mass_distribution() -> None:
 
 
 def test_force_drives_individual_nodes_with_lag_and_visible_strain() -> None:
-    colony = Colony(17, (600, 400), 24)
+    colony = Colony(17, (600, 755), 24)
+    for _ in range(360):
+        colony.advance(1 / 120, (0, 0), (1200, 800), active=False)
     initial = [node.position for node in colony.nodes]
     for _ in range(120):
         colony.advance(1 / 120, (70, 0), (1200, 800))
@@ -54,11 +56,11 @@ def test_force_drives_individual_nodes_with_lag_and_visible_strain() -> None:
     assert colony.center[0] > 630
     assert max(deltas) - min(deltas) > 1
     assert max(node.velocity[0] for node in colony.nodes) - min(node.velocity[0] for node in colony.nodes) > 1
-    assert 0.02 < strain(colony) < 0.30
+    assert 0.02 < strain(colony) < 0.75  # Gravity compresses the supported mesh.
 
 
 def test_stretched_bonds_recover_without_restoring_a_rigid_pose() -> None:
-    colony = Colony(17, (600, 400), 24)
+    colony = Colony(17, (600, 400), 24, PhysicsConfig(gravity=0, propulsion_enabled=False))
     node = colony.nodes[-1]
     node.position = (node.position[0] + colony.spacing * 0.8, node.position[1])
     stretched = strain(colony)
@@ -99,7 +101,7 @@ def test_nodes_deform_against_world_walls_without_leaving_them() -> None:
             assert radius <= node.position[0] <= 300 - radius
             assert radius <= node.position[1] <= 200 - radius
     assert contacts > 0
-    assert strain(colony) < 0.5
+    assert strain(colony) < 0.75
 
 
 def test_prolonged_motion_remains_finite_cohesive_and_bounded() -> None:
@@ -108,7 +110,7 @@ def test_prolonged_motion_remains_finite_cohesive_and_bounded() -> None:
         t = step / 120
         colony.advance(1 / 120, (55 * cos(t * 0.23), 55 * sin(t * 0.31)), (1200, 800))
         if step % 120 == 0:
-            assert strain(colony) < 0.35
+            assert strain(colony) < 0.8
             for node in colony.nodes:
                 assert all(isfinite(value) for value in (*node.position, *node.velocity))
                 assert 0 <= node.position[0] <= 1200 and 0 <= node.position[1] <= 800
@@ -154,10 +156,12 @@ def test_pause_reset_and_death_apply_to_all_nodes() -> None:
     simulation.paused = False
     simulation.life.energy = 0
     simulation.update(1 / 60)
-    frozen = physical_state(simulation.colony)
+    age = simulation.life.age_seconds
+    elapsed = simulation.colony.elapsed_seconds
     simulation.update(1)
-    assert physical_state(simulation.colony) == frozen
-    assert all(node.velocity == (0, 0) for node in simulation.colony.nodes)
+    assert simulation.life.age_seconds == age and not simulation.life.alive
+    assert simulation.colony.elapsed_seconds > elapsed  # Corpses remain passive physical objects.
+    assert all(isfinite(value) for node in simulation.colony.nodes for value in node.velocity)
 
 
 @pytest.mark.parametrize("dt", [0, -1, float("inf"), float("nan")])

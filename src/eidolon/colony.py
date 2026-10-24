@@ -9,6 +9,8 @@ from math import ceil, cos, exp, hypot, isfinite, sin, sqrt
 from random import Random
 
 from eidolon.interaction import GrabConstraint
+from eidolon.config import PhysicsConfig
+from eidolon.locomotion import ground_drive
 from eidolon.spatial import nearby_pairs
 
 
@@ -48,21 +50,25 @@ class Colony:
                  (5, 7, 9, 11, 12, 12, 11, 9, 7, 5),
                  (6, 8, 10, 12, 13, 12, 10, 8, 6))
     MAX_NEIGHBORS = 8
-    BREAK_FORCE = 1800.0
+    BREAK_FORCE = 4500.0  # Floor friction/load must not make a slow pull tear immediately.
     BREAK_STRAIN = 0.18
     BREAK_DWELL = 0.12
     RECONNECT_DELAY = 0.45
 
-    def __init__(self, seed: int, center: Point, base_radius: float) -> None:
+    def __init__(self, seed: int, center: Point, base_radius: float,
+                 physics: PhysicsConfig | None = None) -> None:
         if not isfinite(base_radius) or base_radius <= 0:
             raise ValueError("base_radius must be finite and positive")
         rng = Random(seed ^ 0xC010F1)
+        self.physics = physics if physics is not None else PhysicsConfig()
         rows = rng.choice(self.ROW_PLANS)
         self.base_radius = base_radius
         self.spacing = base_radius * 0.375
         self.scale = 1.0
         self.elapsed_seconds = 0.0
         self.wall_contacts = 0
+        self.floor_contacts = 0
+        self.side_contacts = 0
         self.grab: GrabConstraint | None = None
         self.broken_bonds = 0
         self.reconnected_bonds = 0
@@ -248,12 +254,15 @@ class Colony:
             node.previous_radius + (node.radius - node.previous_radius) * alpha,
         ) for node in self.nodes)
 
-    def set_growth(self, scale: float) -> None:
+    def set_growth(self, scale: float, world_size: Point | None = None) -> None:
         if not isfinite(scale) or scale <= 0:
             raise ValueError("colony scale must be finite and positive")
         self.scale = scale
         for node in self.nodes:
             node.radius = node.rest_radius * scale
+            if world_size is not None:
+                radius = node.radius * MEMBRANE_RADIUS
+                node.position = tuple(min(size - radius, max(radius, value)) for size, value in zip(world_size, node.position))
 
     def translate_to(self, center: Point) -> None:
         """Setup/reposition utility; locomotion never calls this method."""
@@ -268,7 +277,7 @@ class Colony:
             node.velocity = (0.0, 0.0)
         self.begin_step()
 
-    def advance(self, dt: float, desired_velocity: Point, world_size: Point) -> Point:
+    def advance(self, dt: float, desired_velocity: Point, world_size: Point, *, active: bool = True) -> Point:
         """Advance physics and return the primary component's material displacement."""
         if not isfinite(dt) or dt <= 0 or any(not isfinite(v) for v in desired_velocity):
             raise ValueError("physics timestep must be positive and inputs finite")
@@ -278,29 +287,31 @@ class Colony:
             raise ValueError("physics world must fit the biomass nodes")
         count = max(1, ceil(dt / self.MAX_STEP - 1e-9))
         self.wall_contacts = 0
+        self.side_contacts = 0
         old_positions = [node.position for node in self.nodes]
         for _ in range(count):
-            self._step(dt / count, desired_velocity, world_size)
+            self._step(dt / count, desired_velocity, world_size, active)
         primary = self.components[0]
         mass = sum(self.nodes[index].mass for index in primary)
         return tuple(sum((self.nodes[index].position[axis] - old_positions[index][axis]) * self.nodes[index].mass
                          for index in primary) / mass for axis in (0, 1))
 
-    def _step(self, dt: float, desired: Point, world_size: Point) -> None:
+    def _step(self, dt: float, desired: Point, world_size: Point, active: bool) -> None:
         nodes = self.nodes
-        center, velocity = self.center, self.velocity
+        velocity = self.velocity
         held = self._component_index[self.grab.node] if self.grab is not None else None
+        supports = [node.position[1] + node.radius * MEMBRANE_RADIUS >= world_size[1] - self.physics.contact_slop
+                    for node in nodes]
+        supporting_nodes = [tuple(index for index in component if supports[index]) for component in self.components]
         main_goal = ((0.0, 0.0) if held == 0 else
-                     tuple(value * (0.35 if len(self.components) > 1 else 1.0) for value in desired))
+                     (desired[0] * (0.35 if len(self.components) > 1 else 1.0), 0.0))
         # Ease locomotion before a wall instead of continually compressing the
         # entire mesh into it. Pointer forces still use the physical wall solve.
-        clearance = [min((node.position[axis] - node.radius * MEMBRANE_RADIUS
-                          if main_goal[axis] < 0 else world_size[axis] - node.position[axis] - node.radius * MEMBRANE_RADIUS)
-                         for node in (nodes[index] for index in self.components[0])) for axis in (0, 1)]
-        main_goal = tuple(value * min(1.0, max(0.0, gap / (self.spacing * self.scale * 1.5)))
-                          for value, gap in zip(main_goal, clearance))
+        clearance = min((node.position[0] - node.radius * MEMBRANE_RADIUS if main_goal[0] < 0
+                         else world_size[0] - node.position[0] - node.radius * MEMBRANE_RADIUS)
+                        for node in (nodes[index] for index in self.components[0]))
+        main_goal = (main_goal[0] * min(1.0, max(0.0, clearance / (self.spacing * self.scale * 1.5))), 0.0)
         desired_speed = hypot(*main_goal)
-        direction = (main_goal[0] / desired_speed, main_goal[1] / desired_speed) if desired_speed else (0, 0)
         goals = [(main_goal, velocity)]
         for component_index, component in enumerate(self.components[1:], 1):
             fragment_velocity = self._mean(component, "velocity")
@@ -309,34 +320,35 @@ class Colony:
             else:
                 distance, first, second = min(
                     (hypot(nodes[a].position[0] - nodes[b].position[0], nodes[a].position[1] - nodes[b].position[1]), a, b)
-                    for a in component for b in self.components[0]
+                    for a in (supporting_nodes[component_index] or component)
+                    for b in (supporting_nodes[0] or self.components[0])
                 )
                 a, b = nodes[first], nodes[second]
                 closing_speed = min(90.0, max(0.0, distance - self.spacing * self.scale * 0.85) * 4)
-                goal = (velocity[0] + (b.position[0] - a.position[0]) / max(distance, 1e-6) * closing_speed,
-                        velocity[1] + (b.position[1] - a.position[1]) / max(distance, 1e-6) * closing_speed)
+                goal = (velocity[0] + (b.position[0] - a.position[0]) / max(distance, 1e-6) * closing_speed, 0.0)
             goals.append((goal, fragment_velocity))
-        activity = min(1.0, desired_speed / 55)
-        maximum_speed = 220 * sqrt(self.scale)
-        velocity_damping = exp(-0.8 * dt)
+        driving_active = active and self.physics.propulsion_enabled
+        activity = min(1.0, desired_speed / 55) if driving_active else 0.0
+        maximum_speed = self.physics.max_speed * sqrt(self.scale)
+        velocity_damping = exp(-self.physics.linear_damping * dt)
         relative_damping = exp(-2.0 * dt)
         cell_size = max(node.radius for node in nodes) * 1.84
         old_positions = [node.position for node in nodes]
+        forces = []
+        for index, component in enumerate(self.components):
+            forces.append(ground_drive(goals[index][0][0], goals[index][1][0],
+                                       sum(nodes[item].mass for item in component),
+                                       sum(supports[item] for item in component), self.physics,
+                                       driving_active and held != index))
         for node in nodes:
             if not all(isfinite(v) for v in (*node.position, *node.velocity)):
                 raise FloatingPointError("nonfinite colony state")
             if not isfinite(node.mass) or node.mass <= 0:
                 raise ValueError("node mass must be finite and positive")
-            projection = ((node.position[0] - center[0]) * direction[0]
-                          + (node.position[1] - center[1]) * direction[1]) / (self.spacing * self.scale * 2.5)
             component_index = self._component_index[node.identifier]
             goal, component_velocity = goals[component_index]
-            traction = min(1.8, max(0.25, 1 + projection * 0.9)) if component_index == 0 else 1.0
-            # A held component is free to follow the spring: controller braking
-            # against every particle made dense colonies feel rigid to the hand.
-            driving = 0.0 if held == component_index else 12.0
-            fx = (goal[0] - component_velocity[0]) * driving * traction
-            fy = (goal[1] - component_velocity[1]) * driving * traction
+            fx = forces[component_index] if supports[node.identifier] else 0.0
+            fy = 0.0
             if self.grab is not None and self.grab.node == node.identifier:
                 grab_force = self.grab.force(node.position, node.velocity, world_size, node.radius * MEMBRANE_RADIUS, self.scale)
                 fx += grab_force[0]
@@ -347,6 +359,7 @@ class Colony:
             # rotating the colony to match its steering direction.
             vx = component_velocity[0] + (vx - component_velocity[0]) * relative_damping
             vy = component_velocity[1] + (vy - component_velocity[1]) * relative_damping
+            vy += self.physics.gravity * dt
             magnitude = hypot(vx, vy)
             if magnitude > maximum_speed:
                 vx, vy = vx * maximum_speed / magnitude, vy * maximum_speed / magnitude
@@ -354,7 +367,7 @@ class Colony:
         self.elapsed_seconds += dt
         targets = [(bond.rest_length + (bond.capture_length - bond.rest_length)
                     * exp(-3 * (self.elapsed_seconds - bond.created_at)) if bond.capture_length else bond.rest_length) * self.scale * (
-            1 + 0.015 * sin(self.elapsed_seconds * 1.6 + self.phase)
+            1 + (0.015 * sin(self.elapsed_seconds * 1.6 + self.phase) if driving_active else 0.0)
             + 0.065 * activity * sin(self.elapsed_seconds * 2.3 - bond.phase * 0.8 + self.phase)
         ) for bond in self.bonds]
         lambdas = [0.0] * len(self.bonds)
@@ -386,16 +399,29 @@ class Colony:
                     b.position = (b.position[0] + nx * correction * inverse_b, b.position[1] + ny * correction * inverse_b)
             for node in nodes:
                 radius = node.radius * MEMBRANE_RADIUS
+                floor = world_size[1] - radius
+                penetration = max(0.0, node.position[1] - floor)
+                if penetration:
+                    delta_x = node.position[0] - old_positions[node.identifier][0]
+                    friction = min(abs(delta_x), penetration * self.physics.floor_friction)
+                    node.position = (node.position[0] - (friction if delta_x > 0 else -friction), node.position[1])
                 if not (radius <= node.position[0] <= world_size[0] - radius
                         and radius <= node.position[1] <= world_size[1] - radius):
                     self.wall_contacts += 1
+                if not radius <= node.position[0] <= world_size[0] - radius:
+                    self.side_contacts += 1
                 node.position = (min(world_size[0] - radius, max(radius, node.position[0])),
                                  min(world_size[1] - radius, max(radius, node.position[1])))
         for node, old in zip(nodes, old_positions):
             vx, vy = (node.position[0] - old[0]) / dt, (node.position[1] - old[1]) / dt
+            if node.position[1] >= world_size[1] - node.radius * MEMBRANE_RADIUS - 1e-9:
+                vy = min(0.0, vy)  # Inelastic contact: no stored downward impact velocity.
             magnitude = hypot(vx, vy)
             if magnitude > maximum_speed:
                 vx, vy = vx * maximum_speed / magnitude, vy * maximum_speed / magnitude
             node.velocity = (vx, vy)
-        self._tear(dt)
-        self._heal()
+        self.floor_contacts = sum(node.position[1] + node.radius * MEMBRANE_RADIUS >= world_size[1] - self.physics.contact_slop
+                                  for node in nodes)
+        if active:
+            self._tear(dt)
+            self._heal()

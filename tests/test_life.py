@@ -4,7 +4,7 @@ from math import hypot, pi
 import pytest
 
 from eidolon.behavior import Decision
-from eidolon.config import LifeConfig, WorldConfig
+from eidolon.config import LifeConfig, PhysicsConfig, WorldConfig
 from eidolon.simulation import Simulation
 from eidolon.world import Food
 from eidolon.colony import MEMBRANE_RADIUS
@@ -48,20 +48,26 @@ def test_movement_velocity_age_and_energy_cost_use_world_units() -> None:
     simulation = Simulation(world_config=EMPTY, life_config=config, controller=controller)
     state = simulation.life
     state.direction = 0
+    simulation.update(3)  # Establish floor contact before measuring compatibility traction.
+    initial_energy, initial_age = state.energy, state.age_seconds
     start = state.position
-    simulation.update(0.1)
+    traveled = 0.0
+    for _ in range(6):
+        previous = state.position
+        simulation.update(1 / 60)
+        traveled += hypot(state.position[0] - previous[0], state.position[1] - previous[1])
     assert state.position[0] > start[0]
     assert 0 < state.speed < config.movement_speed  # Finite force-driven acceleration.
     assert state.position == simulation.colony.center
-    traveled = hypot(state.position[0] - start[0], state.position[1] - start[1])
-    assert state.energy == pytest.approx(70 - 0.1 - traveled * 0.025, abs=1e-5)
-    assert state.age_seconds == pytest.approx(0.1)
+    assert state.energy == pytest.approx(initial_energy - 0.1 - traveled * 0.025, abs=1e-5)
+    assert state.age_seconds == pytest.approx(initial_age + 0.1)
     assert state.health == pytest.approx(state.energy)
 
 
 def test_stationary_organism_pays_metabolism_but_no_movement_cost() -> None:
     config = LifeConfig(metabolism=2, movement_cost=100)
-    simulation = Simulation(world_config=EMPTY, life_config=config, controller=FixedController(speed=0))
+    simulation = Simulation(world_config=EMPTY, life_config=config, controller=FixedController(speed=0),
+                            physics_config=PhysicsConfig(gravity=0, propulsion_enabled=False))
     initial_position = simulation.life.position
     simulation.update(1)
     assert simulation.life.energy == pytest.approx(68)
@@ -97,7 +103,8 @@ def test_sensing_has_a_finite_range_and_controller_is_replaceable() -> None:
     assert controller.senses[-1].food is None
     food = place_food(simulation, (x + 50, y))
     simulation.update(1 / 60)
-    assert controller.senses[-1].food == food
+    assert controller.senses[-1].food.identifier == food.identifier
+    assert controller.senses[-1].food.position[1] > food.position[1]
     assert simulation.life.foods_eaten == 0
 
 
@@ -108,7 +115,7 @@ def test_rules_approach_and_consume_detected_food() -> None:
     target = place_food(simulation, (x + 150, y))
     simulation.life.direction = 0
     simulation.life.energy = 40
-    simulation.update(3)
+    simulation.update(4)  # Acceleration and floor friction limit the compatibility baseline.
     assert simulation.life.foods_eaten == 1
     assert simulation.world.consume(target.identifier) is None
     assert simulation.life.energy > 40
@@ -151,7 +158,8 @@ def test_growth_requires_both_nutrition_and_available_energy(nutrition, energy) 
 
 def test_growth_is_capped_and_waits_for_room_at_a_boundary() -> None:
     config = LifeConfig(movement_speed=0, metabolism=0, growth_rate=0.2)
-    simulation = Simulation(world_config=EMPTY, life_config=config)
+    simulation = Simulation(world_config=EMPTY, life_config=config,
+                            physics_config=PhysicsConfig(gravity=0, propulsion_enabled=False))
     simulation.life.energy = 100
     simulation.life.nutrition = 1000
     simulation.life.position = (simulation.life.collision_radius, simulation.life.position[1])
@@ -175,23 +183,24 @@ def test_growth_cannot_leave_an_organism_alive_at_zero_energy() -> None:
     assert not simulation.life.alive
 
 
-def test_starvation_kills_and_dead_organisms_do_not_decide_eat_move_or_grow() -> None:
+def test_starvation_stops_decisions_feeding_and_growth_but_keeps_passive_physics() -> None:
     controller = FixedController(speed=0)
     config = LifeConfig(initial_energy=1, metabolism=4)
     simulation = Simulation(world_config=EMPTY, life_config=config, controller=controller)
     simulation.update(1)
     assert not simulation.life.alive
     assert simulation.life.energy == simulation.life.health == 0
-    assert simulation.life.velocity == (0, 0)
     calls = len(controller.senses)
-    biological = asdict(simulation.life)
+    biological = (simulation.life.age_seconds, simulation.life.body_scale, simulation.life.nutrition,
+                  simulation.life.foods_eaten, simulation.life.direction)
     frozen_pose = simulation.organism.pose()
     food = place_food(simulation)
     simulation.update(10)
     assert len(controller.senses) == calls
-    assert asdict(simulation.life) == biological
+    assert (simulation.life.age_seconds, simulation.life.body_scale, simulation.life.nutrition,
+            simulation.life.foods_eaten, simulation.life.direction) == biological
     assert simulation.organism.pose() == frozen_pose
-    assert food in simulation.world.foods
+    assert any(item.identifier == food.identifier for item in simulation.world.foods)
     assert simulation.world.elapsed_seconds == pytest.approx(11)
 
 

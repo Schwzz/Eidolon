@@ -9,6 +9,27 @@ MIN_WINDOW_HEIGHT = 320
 
 
 @dataclass(frozen=True, slots=True)
+class PhysicsConfig:
+    gravity: float = 180.0  # World units/second squared, downward (+Y).
+    floor_friction: float = 0.55
+    linear_damping: float = 0.8
+    max_speed: float = 220.0
+    contact_slop: float = 0.5
+    propulsion_enabled: bool = True
+    drive_acceleration: float = 240.0
+
+    def __post_init__(self) -> None:
+        for name in ("gravity", "floor_friction", "linear_damping", "contact_slop", "drive_acceleration"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
+        if isinstance(self.max_speed, bool) or not isfinite(self.max_speed) or self.max_speed <= 0:
+            raise ValueError("max_speed must be finite and positive")
+        if not isinstance(self.propulsion_enabled, bool):
+            raise ValueError("propulsion_enabled must be a boolean")
+
+
+@dataclass(frozen=True, slots=True)
 class WorldConfig:
     width: float = 1200.0
     height: float = 800.0
@@ -17,9 +38,10 @@ class WorldConfig:
     food_energy: float = 18.0
     food_radius: float = 5.0
     regeneration_interval: float = 3.0  # Zero disables regeneration.
+    food_mass: float = 1.0
 
     def __post_init__(self) -> None:
-        for name in ("width", "height", "food_energy", "food_radius"):
+        for name in ("width", "height", "food_energy", "food_radius", "food_mass"):
             value = getattr(self, name)
             if not isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
@@ -79,6 +101,7 @@ class AppConfig:
     world: WorldConfig = field(default_factory=WorldConfig)
     life: LifeConfig = field(default_factory=LifeConfig)
     controller: str = "rules"
+    physics: PhysicsConfig = field(default_factory=PhysicsConfig)
 
     def __post_init__(self) -> None:
         if self.controller not in ("rules", "neural"):

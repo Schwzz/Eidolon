@@ -28,6 +28,7 @@ def test_reject_invalid_settings(settings) -> None:
     {"width": 0}, {"height": float("inf")}, {"initial_food": -1},
     {"initial_food": 65}, {"food_capacity": True}, {"food_radius": 0},
     {"food_energy": 0}, {"regeneration_interval": -1},
+    {"food_mass": 0},
 ])
 def test_invalid_world_settings_are_rejected(settings) -> None:
     with pytest.raises(ValueError):

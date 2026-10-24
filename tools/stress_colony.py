@@ -16,8 +16,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.cycles <= 0 or not isfinite(args.scale) or not 1 <= args.scale <= 1.6:
         parser.error("--cycles must be positive and --scale must be between 1 and 1.6")
-    colony = Colony(args.seed, (600, 400), 24)
-    colony.set_growth(args.scale)
+    colony = Colony(args.seed, (600, 755), 24)
+    colony.set_growth(args.scale, (1200, 800))
     identities = tuple(id(node) for node in colony.nodes)
     initial_bonds = len(colony.bonds)
     initial_mass = sum(node.mass for node in colony.nodes)

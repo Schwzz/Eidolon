@@ -18,7 +18,7 @@ class Application:
             from eidolon.neural_controller import NeuralController
 
             controller = NeuralController.from_seed(self.config.seed)
-        self.simulation = Simulation(self.config.seed, self.config.world, self.config.life, controller)
+        self.simulation = Simulation(self.config.seed, self.config.world, self.config.life, controller, self.config.physics)
 
     def _pointer_event(self, event, size: tuple[int, int]) -> None:
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
