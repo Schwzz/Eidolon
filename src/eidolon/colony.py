@@ -9,8 +9,9 @@ from math import ceil, cos, exp, hypot, isfinite, sin, sqrt
 from random import Random
 
 from eidolon.interaction import GrabConstraint
-from eidolon.config import PhysicsConfig
+from eidolon.config import MuscleConfig, PhysicsConfig
 from eidolon.locomotion import ground_drive
+from eidolon.muscles import MuscleSystem
 from eidolon.spatial import nearby_pairs
 
 
@@ -56,7 +57,7 @@ class Colony:
     RECONNECT_DELAY = 0.45
 
     def __init__(self, seed: int, center: Point, base_radius: float,
-                 physics: PhysicsConfig | None = None) -> None:
+                 physics: PhysicsConfig | None = None, muscle_config: MuscleConfig | None = None) -> None:
         if not isfinite(base_radius) or base_radius <= 0:
             raise ValueError("base_radius must be finite and positive")
         rng = Random(seed ^ 0xC010F1)
@@ -97,6 +98,8 @@ class Colony:
             if distance <= self.spacing * 1.3:
                 self.bonds.append(Bond(first, second, distance, 0.0015,
                                        (dx / distance, dy / distance), (a.position[0] - center[0]) / self.spacing))
+        self.muscles = MuscleSystem([node.position for node in self.nodes], muscle_config)
+        self.muscle_energy_used = 0.0
         self.rebuild_topology()
         self.anchor_index = min(range(len(self.nodes)), key=lambda i: hypot(
             self.nodes[i].position[0] - center[0], self.nodes[i].position[1] - center[1]))
@@ -111,6 +114,11 @@ class Colony:
     def velocity(self) -> Point:
         identifiers = self.components[0] if hasattr(self, "components") else range(len(self.nodes))
         return self._mean(identifiers, "velocity")
+
+    @property
+    def material_center(self) -> Point:
+        """Mass center of all material, including fragments, for motion measurement."""
+        return self._mean(range(len(self.nodes)), "position")
 
     def _mean(self, identifiers, field: str) -> Point:
         mass = sum(self.nodes[index].mass for index in identifiers)
@@ -145,6 +153,7 @@ class Colony:
             components.append(tuple(sorted(found)))
         self.components = tuple(sorted(components, key=lambda group: (-len(group), group[0])))
         self._component_index = {node: index for index, group in enumerate(self.components) for node in group}
+        self._bond_regions = tuple(self.muscles.bond_region(bond.first, bond.second) for bond in self.bonds)
 
     def begin_grab(self, position: Point, padding: float = 0.0) -> int | None:
         if any(not isfinite(value) for value in position) or not isfinite(padding) or padding < 0:
@@ -277,7 +286,8 @@ class Colony:
             node.velocity = (0.0, 0.0)
         self.begin_step()
 
-    def advance(self, dt: float, desired_velocity: Point, world_size: Point, *, active: bool = True) -> Point:
+    def advance(self, dt: float, desired_velocity: Point, world_size: Point, *, active: bool = True,
+                muscle_energy_budget: float = float("inf")) -> Point:
         """Advance physics and return the primary component's material displacement."""
         if not isfinite(dt) or dt <= 0 or any(not isfinite(v) for v in desired_velocity):
             raise ValueError("physics timestep must be positive and inputs finite")
@@ -285,11 +295,16 @@ class Colony:
             raise ValueError("physics world dimensions must be finite and positive")
         if min(world_size) <= max(node.radius for node in self.nodes) * MEMBRANE_RADIUS * 2:
             raise ValueError("physics world must fit the biomass nodes")
+        if muscle_energy_budget < 0 or muscle_energy_budget != muscle_energy_budget:
+            raise ValueError("muscle energy budget must be nonnegative")
         count = max(1, ceil(dt / self.MAX_STEP - 1e-9))
         self.wall_contacts = 0
         self.side_contacts = 0
+        self.muscle_energy_used = 0.0
         old_positions = [node.position for node in self.nodes]
         for _ in range(count):
+            self.muscle_energy_used += self.muscles.advance(
+                dt / count, max(0.0, muscle_energy_budget - self.muscle_energy_used), active=active)
             self._step(dt / count, desired_velocity, world_size, active)
         primary = self.components[0]
         mass = sum(self.nodes[index].mass for index in primary)
@@ -339,7 +354,7 @@ class Colony:
             forces.append(ground_drive(goals[index][0][0], goals[index][1][0],
                                        sum(nodes[item].mass for item in component),
                                        sum(supports[item] for item in component), self.physics,
-                                       driving_active and held != index))
+                                       driving_active and held != index) if driving_active else 0.0)
         for node in nodes:
             if not all(isfinite(v) for v in (*node.position, *node.velocity)):
                 raise FloatingPointError("nonfinite colony state")
@@ -365,11 +380,12 @@ class Colony:
                 vx, vy = vx * maximum_speed / magnitude, vy * maximum_speed / magnitude
             node.position = (node.position[0] + vx * dt, node.position[1] + vy * dt)
         self.elapsed_seconds += dt
+        muscle_factors = self.muscles.length_factors
         targets = [(bond.rest_length + (bond.capture_length - bond.rest_length)
                     * exp(-3 * (self.elapsed_seconds - bond.created_at)) if bond.capture_length else bond.rest_length) * self.scale * (
             1 + (0.015 * sin(self.elapsed_seconds * 1.6 + self.phase) if driving_active else 0.0)
             + 0.065 * activity * sin(self.elapsed_seconds * 2.3 - bond.phase * 0.8 + self.phase)
-        ) for bond in self.bonds]
+        ) * muscle_factors[region] for bond, region in zip(self.bonds, self._bond_regions)]
         lambdas = [0.0] * len(self.bonds)
         for _ in range(self.SOLVER_ITERATIONS):
             for index, bond in enumerate(self.bonds):

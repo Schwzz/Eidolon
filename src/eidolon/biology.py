@@ -28,6 +28,7 @@ class LifeState:
     body_scale: float = 1.0
     nutrition: float = 0.0
     foods_eaten: int = 0
+    muscle_energy_spent: float = 0.0
     alive: bool = True
     previous_position: tuple[float, float] = (0.0, 0.0)
     previous_scale: float = 1.0

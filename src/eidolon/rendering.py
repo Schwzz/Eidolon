@@ -48,7 +48,9 @@ class ChamberRenderer:
         surface.blit(
             self._label("SIMULATION CHAMBER", self.MUTED), (24, 50)
         )
-        caption = "PHASE 2A.1" + (f" | {simulation.controller_name.upper()}" if simulation is not None else "")
+        mode = (f"MUSCLE {simulation.muscle_test.upper()}" if simulation is not None and simulation.muscle_test
+                else simulation.controller_name.upper() if simulation is not None else "")
+        caption = "PHASE 2A.2" + (f" | {mode}" if mode else "")
         phase = self._label(caption, self.ACCENT)
         surface.blit(phase, (width - phase.get_width() - 24, 29))
 
@@ -83,6 +85,18 @@ class ChamberRenderer:
             speed_label = self._label(speed, self.ACCENT)
             surface.blit(speed_label, (width - speed_label.get_width() - 40, height - 68))
             controls = "LMB Grab  SPACE Pause  R Reset  +/-"
+            if simulation.muscle_test is not None:
+                # A compact extra HUD line; the organism's renderer is unchanged.
+                y = height - 46
+                for region, activation in enumerate(simulation.colony.muscles.activations):
+                    x = 40 + region * 23
+                    pygame.draw.rect(surface, self.BORDER, (x, y, 20, 13))
+                    pygame.draw.rect(surface, self.ACCENT, (x, y, round(20 * activation), 13))
+                    surface.blit(self._label(str(region + 1), self.TEXT), (x + 6, y - 1))
+                motion = f"dx {simulation.muscle_displacement:+.1f}  E {life.muscle_energy_spent:.1f}"
+                surface.blit(self._label(motion, self.MUTED), (236, y))
+                if simulation.muscle_test == "manual" and width >= 800:
+                    controls += "  1-8 Muscles  0 Relax"
         else:
             controls = "EMPTY CHAMBER"
         surface.blit(self._label(controls, self.MUTED), (24, height - 29))

@@ -20,6 +20,7 @@ def main() -> None:
     parser.add_argument("--gravity", type=float, default=180.0)
     parser.add_argument("--floor-friction", type=float, default=0.55)
     parser.add_argument("--no-propulsion", action="store_true")
+    parser.add_argument("--muscle-test", choices=("manual", "wave"))
     parser.add_argument("--scale", type=float, default=1.0, help="Initial biological growth scale (1.0–1.6)")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--interaction", action="store_true", help="Exercise repeated pulling and fragment recovery")
@@ -41,8 +42,9 @@ def main() -> None:
 
     try:
         config = AppConfig(width=args.width, height=args.height, seed=args.seed, controller=args.controller,
+                           muscle_test=args.muscle_test,
                            physics=PhysicsConfig(gravity=args.gravity, floor_friction=args.floor_friction,
-                                                 propulsion_enabled=not args.no_propulsion))
+                                                 propulsion_enabled=not (args.no_propulsion or args.muscle_test)))
     except ValueError as error:
         parser.error(str(error))
     if not isfinite(args.scale) or not 1 <= args.scale <= config.life.max_scale:
@@ -60,7 +62,8 @@ def main() -> None:
             from eidolon.neural_controller import NeuralController
 
             controller = NeuralController.from_seed(config.seed if args.network_seed is None else args.network_seed)
-        simulation = Simulation(config.seed, config.world, config.life, controller, config.physics)
+        simulation = Simulation(config.seed, config.world, config.life, controller, config.physics,
+                                config.muscles, config.muscle_test)
         simulation.life.body_scale = args.scale
         simulation.colony.set_growth(args.scale, (config.world.width, config.world.height))
         simulation.life.position = simulation.colony.center
@@ -104,6 +107,9 @@ def main() -> None:
             "controller": simulation.controller_name,
             "gravity": config.physics.gravity,
             "propulsion_enabled": config.physics.propulsion_enabled,
+            "muscle_test": simulation.muscle_test,
+            "muscle_dx": round(simulation.muscle_displacement, 3),
+            "muscle_energy": round(simulation.life.muscle_energy_spent, 3),
             "floor_contacts": simulation.colony.floor_contacts,
             "alive": simulation.life.alive,
             "food": len(simulation.world.foods),

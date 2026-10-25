@@ -9,6 +9,25 @@ MIN_WINDOW_HEIGHT = 320
 
 
 @dataclass(frozen=True, slots=True)
+class MuscleConfig:
+    max_contraction: float = 0.28  # Fraction of a bond's relaxed length.
+    contraction_rate: float = 1.5  # Activation units/second.
+    relaxation_rate: float = 2.0
+    holding_cost: float = 1.2  # Energy/second at full-body activation.
+    contraction_cost: float = 0.8  # Energy per full-body activation increase.
+
+    def __post_init__(self) -> None:
+        for name in ("max_contraction", "contraction_rate", "relaxation_rate", "holding_cost", "contraction_cost"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
+        if self.max_contraction > 0.35:
+            raise ValueError("max_contraction cannot exceed 0.35")
+        if min(self.contraction_rate, self.relaxation_rate) <= 0:
+            raise ValueError("muscle activation rates must be positive")
+
+
+@dataclass(frozen=True, slots=True)
 class PhysicsConfig:
     gravity: float = 180.0  # World units/second squared, downward (+Y).
     floor_friction: float = 0.55
@@ -102,8 +121,12 @@ class AppConfig:
     life: LifeConfig = field(default_factory=LifeConfig)
     controller: str = "rules"
     physics: PhysicsConfig = field(default_factory=PhysicsConfig)
+    muscles: MuscleConfig = field(default_factory=MuscleConfig)
+    muscle_test: str | None = None
 
     def __post_init__(self) -> None:
+        if self.muscle_test not in (None, "manual", "wave"):
+            raise ValueError("muscle_test must be 'manual', 'wave', or None")
         if self.controller not in ("rules", "neural"):
             raise ValueError("controller must be 'rules' or 'neural'")
         for name in ("width", "height", "max_fps", "simulation_hz", "max_updates_per_frame", "seed"):

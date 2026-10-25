@@ -18,7 +18,18 @@ class Application:
             from eidolon.neural_controller import NeuralController
 
             controller = NeuralController.from_seed(self.config.seed)
-        self.simulation = Simulation(self.config.seed, self.config.world, self.config.life, controller, self.config.physics)
+        self.simulation = Simulation(self.config.seed, self.config.world, self.config.life, controller,
+                                     self.config.physics, self.config.muscles, self.config.muscle_test)
+
+    def _muscle_key(self, event) -> None:
+        if self.simulation.muscle_test != "manual":
+            return
+        if pygame.K_1 <= event.key <= pygame.K_8:
+            values = list(self.simulation.colony.muscles.targets)
+            values[event.key - pygame.K_1] = 1.0 if event.type == pygame.KEYDOWN else 0.0
+            self.simulation.set_muscle_activations(values)
+        elif event.key == pygame.K_0:
+            self.simulation.relax_muscles()
 
     def _pointer_event(self, event, size: tuple[int, int]) -> None:
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -54,6 +65,7 @@ class Application:
                     if event.type == pygame.QUIT:
                         running = False
                     elif event.type == pygame.KEYDOWN:
+                        self._muscle_key(event)
                         if event.key == pygame.K_ESCAPE:
                             running = False
                         elif event.key == pygame.K_SPACE:
@@ -68,8 +80,11 @@ class Application:
                             self.simulation.set_speed(
                                 min(2.0, self.simulation.speed + 0.25)
                             )
+                    elif event.type == pygame.KEYUP:
+                        self._muscle_key(event)
                     elif event.type == pygame.VIDEORESIZE:
                         self.simulation.release_grab()
+                        self.simulation.relax_muscles()
                         surface = pygame.display.set_mode(
                             (
                                 max(MIN_WINDOW_WIDTH, event.w),
@@ -81,6 +96,7 @@ class Application:
                         self._pointer_event(event, surface.get_size())
                     elif event.type in (pygame.WINDOWFOCUSLOST, pygame.WINDOWLEAVE):
                         self.simulation.release_grab()
+                        self.simulation.relax_muscles()
                 if not running:
                     break
 
@@ -92,4 +108,5 @@ class Application:
                 frame_limiter.tick(self.config.max_fps)
         finally:
             self.simulation.release_grab()
+            self.simulation.relax_muscles()
             pygame.quit()

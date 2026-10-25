@@ -1,12 +1,14 @@
 """Fixed-step coordination of a world, biology, rules, and presentation clocks."""
 
+from dataclasses import replace
 from math import atan2, ceil, cos, hypot, isfinite, pi, sin, tau
 
-from eidolon.behavior import Controller, Senses, SurvivalRules
+from eidolon.behavior import Controller, Decision, Senses, SurvivalRules
 from eidolon.biology import LifeState, SPRITE_EXTENT
-from eidolon.config import LifeConfig, PhysicsConfig, WorldConfig
+from eidolon.config import LifeConfig, MuscleConfig, PhysicsConfig, WorldConfig
 from eidolon.colony import Colony, MEMBRANE_RADIUS
 from eidolon.organism import Symbiote
+from eidolon.muscles import wave_activations
 from eidolon.world import World
 
 
@@ -17,11 +19,18 @@ class Simulation:
         self, seed: int = 17, world_config: WorldConfig | None = None,
         life_config: LifeConfig | None = None, controller: Controller | None = None,
         physics_config: PhysicsConfig | None = None,
+        muscle_config: MuscleConfig | None = None, muscle_test: str | None = None,
     ) -> None:
         self.seed = seed
         self.world_config = world_config if world_config is not None else WorldConfig()
         self.life_config = life_config if life_config is not None else LifeConfig()
         self.physics_config = physics_config if physics_config is not None else PhysicsConfig()
+        if muscle_test not in (None, "manual", "wave"):
+            raise ValueError("muscle_test must be 'manual', 'wave', or None")
+        self.muscle_test = muscle_test
+        self.muscle_config = muscle_config if muscle_config is not None else MuscleConfig()
+        if muscle_test is not None and self.physics_config.propulsion_enabled:
+            self.physics_config = replace(self.physics_config, propulsion_enabled=False)
         self.controller = controller if controller is not None else SurvivalRules(seed)
         self.organism = Symbiote(seed)  # Appearance/animation; no biological data.
         self._paused = False
@@ -40,6 +49,7 @@ class Simulation:
             # paused updates mutate world state or consume random numbers.
             self.life.begin_step()
             self.colony.release_grab()
+            self.relax_muscles()
             self.colony.begin_step()
             self.world.begin_step()
             self.organism.update(0.0)
@@ -62,15 +72,33 @@ class Simulation:
             (self.seed % 65536) * 0.61803398875 % tau,
             settings.base_radius, settings.initial_energy, settings.max_energy,
         )
-        self.colony = Colony(self.seed, self.life.position, settings.base_radius, self.physics_config)
+        self.colony = Colony(self.seed, self.life.position, settings.base_radius, self.physics_config, self.muscle_config)
         bottom = max(node.position[1] + node.radius * MEMBRANE_RADIUS for node in self.colony.nodes)
         self.colony.translate_to((self.world_config.width / 2,
                                   self.colony.center[1] + self.world_config.height - bottom - 2.0))
         self.life.position = self.colony.center
+        self._initial_material_x = self.colony.material_center[0]
         self.life.begin_step()
         self.steps = 0
         self.elapsed_seconds = 0.0
         self.organism.reset()
+
+    @property
+    def muscle_displacement(self) -> float:
+        return self.colony.material_center[0] - self._initial_material_x
+
+    def set_muscle_activations(self, values) -> None:
+        """Eight normalized actions for manual or future neural controllers.
+
+        Paused/dead organisms validate the action but cannot retain new commands.
+        No network architecture is changed by this independent actuator interface.
+        """
+        self.colony.muscles.set_targets(values)
+        if self.paused or not self.life.alive:
+            self.relax_muscles()
+
+    def relax_muscles(self) -> None:
+        self.colony.muscles.relax()
 
     def set_speed(self, speed: float) -> None:
         if not isfinite(speed) or not 0.25 <= speed <= 2.0:
@@ -149,21 +177,24 @@ class Simulation:
             self._advance_dead(dt)
             return
         self._eat()
+        if self.muscle_test == "wave":
+            self.set_muscle_activations(wave_activations(state.age_seconds))
         sensed_food = self.world.nearest_food(state.position, settings.sensing_radius)
-        decision = self.controller.decide(Senses(
+        decision = (Decision(state.direction, 0.0) if self.muscle_test is not None else self.controller.decide(Senses(
             state.position, state.direction, state.age_seconds,
             state.energy / state.max_energy, state.collision_radius,
             (self.world_config.width, self.world_config.height), sensed_food,
             speed=state.speed, speed_reference=settings.movement_speed, sensing_radius=settings.sensing_radius,
             grounded_world=True,
-        ))
+        )))
         if not isfinite(decision.direction) or not isfinite(decision.speed_fraction):
             raise ValueError("controller decisions must be finite")
         turn = atan2(sin(decision.direction - state.direction), cos(decision.direction - state.direction))
         state.direction = (state.direction + min(settings.turn_rate * dt, max(-settings.turn_rate * dt, turn))) % tau
         speed = settings.movement_speed / state.body_scale**0.5 * min(1.0, max(0.0, decision.speed_fraction))
         displacement = self.colony.advance(dt, (cos(state.direction) * speed, sin(state.direction) * speed),
-                                           (self.world_config.width, self.world_config.height))
+                                           (self.world_config.width, self.world_config.height),
+                                           muscle_energy_budget=state.energy)
         state.position = self.colony.center
         state.velocity = tuple(value / dt for value in displacement)
         # Membership changes can move a centroid without moving any material.
@@ -172,11 +203,13 @@ class Simulation:
         if self.colony.side_contacts and speed > 0 and abs(displacement[0]) < speed * dt * 0.2:
             state.direction = 0.0 if state.position[0] < self.world_config.width / 2 else pi
         state.age_seconds += dt
+        state.muscle_energy_spent += self.colony.muscle_energy_used
         state.energy = max(0.0, state.energy - settings.metabolism * state.body_scale**2 * dt
-                           - settings.movement_cost * traveled)
+                           - settings.movement_cost * traveled - self.colony.muscle_energy_used)
         if state.energy <= 1e-10:
             state.die()
             self.colony.release_grab()
+            self.relax_muscles()
             state.velocity = self.colony.velocity
             return
         self._eat()
@@ -198,11 +231,13 @@ class Simulation:
             if state.energy <= 1e-10:
                 state.die()
                 self.colony.release_grab()
+                self.relax_muscles()
                 state.velocity = self.colony.velocity
 
     def _advance_dead(self, dt: float) -> None:
         """Biology stops at death, while the body remains a passive physical object."""
         self.colony.release_grab()
+        self.relax_muscles()
         displacement = self.colony.advance(dt, (0.0, 0.0),
                                            (self.world_config.width, self.world_config.height), active=False)
         self.life.position = self.colony.center

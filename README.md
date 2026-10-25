@@ -1,8 +1,9 @@
 # EIDOLON
 
-An experimental artificial-life sandbox for Windows desktop. **Phase 2A.1:
-Grounded Physics Foundation** makes the chamber a gravity-based 2D side view.
-Biomass and food fall, collide with the floor, and settle. The existing survival
+An experimental artificial-life sandbox for Windows desktop. **Phase 2A.2:
+Artificial Muscles** adds eight controllable material regions to the grounded
+2D colony. They deform existing bonds and can move the body through floor contact
+with compatibility propulsion disabled. Biomass and food fall and settle. Survival
 rules remain the default, and the seeded NumPy neural controller is retained.
 The biomass appearance, grabbing, tearing/reconnection, energy, growth,
 starvation, fixed world, and model format remain.
@@ -11,8 +12,7 @@ There is no training, learning, memory, evolution, reproduction, or second
 organism. Neural weights are initially random; neural mode is an experiment,
 not a trained survival policy. No ML frameworks, pretrained models, LLMs, cloud
 APIs, credentials, or network connection are required after installation.
-No muscle actuators, reaching/gripping, rewards, or reinforcement learning are
-implemented in this phase.
+No reaching/gripping, rewards, reinforcement learning, or training are implemented.
 
 ## Windows setup (PowerShell)
 
@@ -189,10 +189,10 @@ Grabbing remains an external force and can lift tissue while held.
 
 `--no-propulsion` disables traction, assisted fragment travel, and automatic
 breathing/traveling bond waves completely. Gravity, damping, elastic recovery,
-contacts, grabbing/tearing, and nearby material reconnection remain. This is a
-passive-physics switch for future controllers; it does not add muscles or training.
+contacts, grabbing/tearing, nearby material reconnection, and commanded muscles
+remain. Without muscle commands this is a passive body.
 Public node IDs, positions, velocities, masses, adjacency, and bond rest lengths/
-compliance remain available for future local actuation work.
+compliance remain available for future local control.
 
 The headless API needs no graphics or training framework:
 
@@ -212,6 +212,76 @@ These are simplified world-unit dynamics, not a calibrated material model.
 There is currently one flat floor and no obstacles. Food collides with world
 walls/floor; food–food and food–tissue pushing contacts are not implemented.
 Consumption still uses the existing feeding interaction range.
+
+## Artificial muscles
+
+```powershell
+.\.venv\Scripts\python.exe -m eidolon --muscle-test manual --no-propulsion
+.\.venv\Scripts\python.exe -m eidolon --muscle-test wave --seed 17
+```
+
+Both muscle-test modes **automatically disable compatibility propulsion**, assisted
+fragment travel, and the old automatic gait. Steering controllers are bypassed in
+test mode. All displacement comes from internal bond constraints interacting with
+gravity, ground contact, and friction; no translation, horizontal drive force,
+or fragment homing is substituted. Mouse grabbing still applies an external force.
+Normal rules/neural modes and saved networks are preserved; muscles start relaxed.
+
+In `manual` mode, **hold number-row keys 1–8** to contract individual regions,
+release to relax, or press **0** to relax all. Regions are arranged in the original
+material layout: upper left→right **1–4**, lower left→right **5–8**. Membership
+stays attached to node IDs when the tissue moves, folds, grows, tears, or reconnects;
+it does not mean current screen-space top/bottom after deformation. New bonds use
+the midpoint of their endpoints' original material coordinates. The HUD shows
+eight activation bars/numbers, **dx** (all-material horizontal center-of-mass
+displacement from reset, including fragments, in world units) and **E** (cumulative
+muscle energy spent). The organism renderer is unchanged.
+
+`wave` mode uses a predefined four-second traveling contraction with upper/lower
+regions in opposite phases, after three seconds of passive settling. It is a
+demonstration pattern, not a learned or food-seeking gait. Bare `--muscle-test`
+selects `wave`. Pause freezes activation, physics, and pattern time; reset clears
+muscle state/costs and restarts the seeded episode. Pause, resize, lost focus,
+window leave, shutdown, and death clear manual commands; press again to resume.
+The automatic wave resumes on the next live update, except while paused/dead.
+Space, R, +/−, Escape, and mouse interaction keep their existing meanings.
+
+`muscles.py` is independent of graphics, neural math, biology, and external forces.
+Eight normalized actions in **[0, 1]** control existing XPBD rest-length targets.
+`MuscleConfig` defaults: maximum shortening **28%** (hard configuration ceiling
+35%), activation increase **1.5/second**, relaxation **2/second**, holding cost
+**1.2 energy/second** at full-body activation, and **0.8 energy** per full-body
+activation increase. Costs are weighted by the original material share, so new
+healed bonds do not multiply consumption. The simulation deducts costs from the
+same biological energy supply as metabolism and movement. Insufficient fuel or
+death triggers rate-limited passive relaxation; it cannot power new contractions.
+Original bond rest lengths remain unchanged, so release restores relaxed targets.
+Existing compliance, collision, damping, and velocity/extension limits still apply.
+
+Future controllers can use this headless action interface without changing the
+current **12→16→2** steering network or version-1 neural JSON:
+
+```python
+from eidolon.config import PhysicsConfig
+from eidolon.simulation import Simulation
+
+simulation = Simulation(seed=17, physics_config=PhysicsConfig(propulsion_enabled=False))
+simulation.set_muscle_activations([0.8, 0.4, 0, 0, 0, 0, 0.4, 0.8])
+for _ in range(120):
+    simulation.update(1 / 60)
+activations = simulation.colony.muscles.activations
+regions = simulation.colony.muscles.node_regions
+simulation.relax_muscles()
+simulation.reset()  # Same mesh, assignments, relaxed actions, food, and RNG state.
+```
+
+No network is trained, replaced, or automatically mapped to eight outputs.
+For isolated muscle movement use `propulsion_enabled=False` or a muscle-test mode;
+normal compatibility mode can intentionally combine its old drive with muscle actions.
+Detached fragments retain their muscle regions and shared biology. Nearby contact
+can rebuild multiple bonds; distant fragments have no assisted return when
+propulsion is disabled and may remain separated until physical contact is restored.
+The graph is a simplified elastic material, not an anatomical muscle model.
 
 ## Living biomass physics
 
@@ -385,7 +455,11 @@ light stamps are reused, and HUD label caching remains bounded.
 .\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --interaction
 .\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --interaction --scale 1.6
 .\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --no-propulsion
+.\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --muscle-test wave
+.\.venv\Scripts\python.exe tools\benchmark_muscles.py --seed 17
+.\.venv\Scripts\python.exe tools\benchmark_muscles.py --seed 17 --floor-friction 0
 .\.venv\Scripts\python.exe tools\stress_colony.py --seed 17 --cycles 6 --scale 1.6
+.\.venv\Scripts\python.exe tools\stress_colony.py --seed 17 --cycles 6 --scale 1.6 --muscles
 ```
 
 The benchmark measures uncapped physics/update/draw/presentation and reports node
@@ -395,30 +469,53 @@ growth after warmup. `--headless` selects SDL's dummy driver for cloud runs; it 
 not measure native Windows presentation or guarantee performance on target hardware.
 The display-free stress tool checks repeated tearing/recovery, identity and mass
 conservation, bond accounting, neighbor limits, walls, and finite/capped velocities.
+`--muscles` adds actuator commands to the existing stress tool while retaining
+compatibility fragment recovery. `benchmark_muscles.py` instead disables propulsion
+and compares an active wave against a passive body: 3 seconds settling, 16 seconds
+activation, 4 seconds relaxation by default. It removes food, metabolism, and
+travel costs to isolate actuation; muscle energy costs remain enabled. It reports
+post-settling displacement and passive-baseline-adjusted displacement, checking
+conservation, bounded motion, and complete relaxation. With friction zero and no
+side-wall contact, internal contractions should not move the horizontal mass center.
 
-Phase 2A.1 validation: **332 tests passed on Python 3.12 and 3.14**. The default
-12→16→2 network averaged **8.42 µs per forward pass** and **13.33 µs per complete
-decision**, including normalization and validation, over 20,000 iterations.
+Phase 2A.2 validation: **382 tests passed on Python 3.12 and 3.14**.
+The unchanged 12→16→2 network averaged **9.66 µs per forward pass** and
+**14.69 µs per complete decision**, including normalization and validation,
+over 20,000 iterations.
 Linux / Python 3.14.8 / NumPy 2.5.4 / SDL dummy measurements at 1280 × 720
 (600 measured frames after 60 warmup frames per run):
 
 | Controller | World seed | Scenario | Mean ms/frame | p95 ms/frame | Max ms/frame |
 | --- | --- | --- | --- | --- | --- |
-| Rules | 17 | Grounded | 6.395 | 7.849 | 12.611 |
-| Neural | 17 | Grounded | 6.419 | 6.928 | 10.649 |
-| Rules | 42 | Grounded | 5.473 | 6.240 | 8.885 |
-| Neural | 42 | Grounded | 5.666 | 6.366 | 9.348 |
-| Rules | 17 | Pulling/recovery, 1.6× growth | 6.925 | 8.465 | 20.279 |
-| Neural | 17 | Pulling/recovery, 1.6× growth | 6.656 | 7.525 | 45.003 |
-| Rules | 17 | Propulsion disabled | 6.905 | 8.014 | 12.992 |
+| Rules | 17 | Compatibility baseline | 6.370 | 7.176 | 10.761 |
+| Neural | 17 | Compatibility baseline | 6.329 | 6.745 | 10.011 |
+| Muscles | 17 | Wave, propulsion disabled | 6.502 | 7.157 | 11.381 |
+| Muscles | 42 | Wave, propulsion disabled | 5.481 | 6.108 | 8.675 |
+| Muscles | 17 | Wave, 1.6× growth, propulsion disabled | 6.814 | 7.716 | 25.723 |
+| Muscles | 17 | Wave + pulling, 1.6× growth, propulsion disabled | 7.251 | 8.570 | 14.894 |
 
 These are cloud measurements, not native Windows or Iris Xe verification.
 Average/p95 timings are below the 16.67 ms frame budget, but isolated cloud
-spikes reached 45 ms; native 60 FPS responsiveness still needs Windows testing.
-Grounded stress checks completed **18 recovery cycles over 369 simulation
-seconds** across three seeds, including 1.6× growth, without lost nodes or
+spikes reached 25.7 ms; native 60 FPS responsiveness still needs Windows testing.
+Muscle-enabled grounded stress checks completed **12 recovery cycles over 246
+simulation seconds** across two seeds, including 1.6× growth, without lost nodes or
 force/velocity/boundary/neighbor-limit violations. Node identity, mass, and bond
-accounting remained intact.
+accounting remained intact. A separate 55-second muscle-only episode and its
+passive control also stayed bounded and retained all 85 nodes/bonds.
+
+Headless muscle displacement, with food/metabolism/travel costs disabled and no
+propulsion (3 seconds settling, 16 seconds wave, 4 seconds relaxation):
+
+| Seed | Friction | Active dx after settling | Passive drift | Baseline-adjusted dx | Muscle energy |
+| --- | --- | --- | --- | --- | --- |
+| 17 | 0.55 | −5.731 | +0.249 | −5.980 | 9.601 |
+| 42 | 0.55 | −4.493 | +0.029 | −4.522 | 9.601 |
+| 17 | 0 | Approximately 0 | Approximately 0 | Approximately 0 | 9.601 |
+
+Displacement is in world units; negative means left. Frictionless horizontal
+mass-center drift stayed below 1e−7 units. Airborne zero-gravity tests also retain
+the mass center despite contractions. These checks exclude drive/teleport helpers
+and demonstrate contact-driven movement, not a trained, fast, or directional gait.
 
 Tests cover seeded connected graphs, force propagation, stretch/recovery,
 self-collision, walls, timestep subdivision, growth, deterministic trajectories,
@@ -442,6 +539,13 @@ Grounded checks cover configurable mass-independent gravity, no flight forces,
 passive settling, floor traction/friction, physical food and collisions,
 interpolation, grounded growth, passive corpses, deterministic episode resets,
 and a subprocess that runs the rules/physics core without Pygame or NumPy.
+Muscle checks cover deterministic material assignments, independent/rate-limited
+activation, bounded shortening, relaxation, energy budgets, starvation, actual
+bond deformation/recovery, no artificial propulsion or airborne translation,
+traction-dependent displacement, nearby-fragment repair, conservation, unchanged
+neural parameters, fixed-step/reset replay, manual key release, pause/resize,
+and HUD render purity at three sizes. Manual and wave modes also passed an SDL
+dummy lifecycle check with pause, resize, restart, and clean exit.
 
 GitHub Actions covers Python 3.11–3.14 on Linux/Windows. Configuring CI does not
 establish that it has run. Native Windows graphical compatibility and Iris Xe
@@ -464,6 +568,7 @@ src/eidolon/
   interaction.py       Force-limited pointer constraint, without display dependencies
   spatial.py           Deterministic local neighbor grid
   locomotion.py        Switchable, floor-only compatibility propulsion
+  muscles.py           Eight material regions, bounded activations, energy, test pattern
   colony_rendering.py  Flat membrane from physical node positions
   biology.py           Colony-wide biological state
   behavior.py          Replaceable sensory/decision interface and survival rules
@@ -491,4 +596,4 @@ python3 -m venv .venv
 This is a simplified 2D elastic graph, not a continuum fluid or a biological
 material model. Recovery can be interrupted by death; dead tissue settles
 passively rather than continuing to reconnect. Learning and evolution remain
-outside this milestone. **Phase 2A.2 has not been started.**
+outside this milestone. **Phase 2B has not been started.**

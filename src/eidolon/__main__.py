@@ -28,6 +28,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--floor-friction", type=float, default=defaults.physics.floor_friction,
                         help="nonnegative floor friction coefficient (default: 0.55)")
     parser.add_argument("--no-propulsion", action="store_true", help="disable compatibility drive, homing, and automatic gait")
+    parser.add_argument("--muscle-test", choices=("manual", "wave"), nargs="?", const="wave",
+                        help="test muscles without propulsion: manual (hold 1-8, 0 relax) or wave (default)")
     parser.add_argument(
         "--max-fps", type=int, default=defaults.max_fps,
         help="render frame limit (default: 60; 0: uncapped)",
@@ -41,8 +43,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         config = AppConfig(width=args.width, height=args.height, max_fps=args.max_fps,
                            seed=args.seed, controller=args.controller,
+                           muscle_test=args.muscle_test,
                            physics=PhysicsConfig(gravity=args.gravity, floor_friction=args.floor_friction,
-                                                 propulsion_enabled=not args.no_propulsion))
+                                                 propulsion_enabled=not (args.no_propulsion or args.muscle_test)))
         controller = None
         if args.controller == "neural":
             from eidolon.neural_controller import NeuralController

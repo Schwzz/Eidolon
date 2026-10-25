@@ -6,6 +6,7 @@ from math import cos, hypot, isfinite, sin
 from time import perf_counter
 
 from eidolon.colony import Colony, MEMBRANE_RADIUS
+from eidolon.muscles import wave_activations
 
 
 def main() -> None:
@@ -13,6 +14,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--cycles", type=int, default=6)
     parser.add_argument("--scale", type=float, default=1.0)
+    parser.add_argument("--muscles", action="store_true", help="Exercise muscles alongside compatibility fragment recovery")
     args = parser.parse_args()
     if args.cycles <= 0 or not isfinite(args.scale) or not 1 <= args.scale <= 1.6:
         parser.error("--cycles must be positive and --scale must be between 1 and 1.6")
@@ -38,6 +40,8 @@ def main() -> None:
             elif frame == 300:
                 colony.release_grab()
             t = steps / 120
+            if args.muscles:
+                colony.muscles.set_targets(wave_activations(t))
             colony.advance(1 / 120, (25 * cos(t * 0.1), 25 * sin(t * 0.1)), (1200, 800))
             steps += 1
             peak_components = max(peak_components, len(colony.components))
@@ -59,6 +63,7 @@ def main() -> None:
         recovered += 1
     assert peak_components > 1 and colony.broken_bonds > 0 and colony.reconnected_bonds > 0
     print(json.dumps(dict(seed=args.seed, scale=args.scale, nodes=len(colony.nodes),
+                          muscles=args.muscles,
                           bonds=len(colony.bonds), simulation_seconds=steps / 120,
                           cycles_recovered=recovered, peak_components=peak_components,
                           broken_bonds=colony.broken_bonds, reconnected_bonds=colony.reconnected_bonds,
