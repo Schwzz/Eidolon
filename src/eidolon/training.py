@@ -108,8 +108,9 @@ class LocomotionEnvironment:
     ACTION_COUNT = 8
     OBSERVATION_NAMES = OBSERVATION_NAMES
 
-    def __init__(self, config: EpisodeConfig | None = None) -> None:
+    def __init__(self, config: EpisodeConfig | None = None, *, allow_grab: bool = False) -> None:
         self.config = config if config is not None else EpisodeConfig()
+        self.allow_grab = allow_grab
         self.seed = self.config.seed
         self.reset()
 
@@ -158,7 +159,7 @@ class LocomotionEnvironment:
 
     def _valid_physics(self) -> bool:
         colony, settings = self.colony, self.config
-        if (colony.physics.propulsion_enabled or colony.grab is not None
+        if (colony.physics.propulsion_enabled or (colony.grab is not None and not self.allow_grab)
                 or tuple((n.identifier, n.mass) for n in colony.nodes) != self._identity):
             return False
         for node in colony.nodes:
@@ -211,14 +212,23 @@ class LocomotionEnvironment:
                     truncated=self._done and self._stable and not self._reached,
                     propulsion_enabled=self.colony.physics.propulsion_enabled)
 
-    def step(self, actions) -> StepResult:
+    def step(self, actions, *, ticks: int | None = None, new_action: bool = True) -> StepResult:
+        """Hold an action for its interval; replay may advance it in smaller chunks.
+
+        A chunk starts a new energy-observation interval only at new_action=True.
+        This keeps replay and headless policy decisions exactly equivalent.
+        """
         if self.done:
             raise RuntimeError("episode is finished; call reset before stepping again")
         # Validation happens before time, physics, rewards, or RNG state changes.
+        if ticks is not None and (type(ticks) is not int or not 1 <= ticks <= self._action_ticks):
+            raise ValueError("ticks must be between 1 and the action interval's tick count")
         self.colony.muscles.set_targets(actions)
         settings, colony = self.config, self.colony
-        reward, self._last_energy = 0.0, 0.0
-        for _ in range(min(self._action_ticks, self._duration_ticks - self._ticks)):
+        reward = 0.0
+        if new_action:
+            self._last_energy = 0.0
+        for _ in range(min(self._action_ticks if ticks is None else ticks, self._duration_ticks - self._ticks)):
             self._stable = (self._valid_physics()
                             and tuple(n.position for n in colony.nodes) == self._last_positions)
             if self._stable:

@@ -1,0 +1,85 @@
+{
+  "rendering": [
+    {
+      "python": "3.14.8",
+      "platform": "Linux",
+      "driver": "dummy",
+      "view": "simulation",
+      "replay": true,
+      "frames": 600,
+      "resolution": [
+        1280,
+        720
+      ],
+      "mean_ms": 1.4018992933840007,
+      "p95_ms": 1.7503980016044807,
+      "max_ms": 3.4233900005347095,
+      "elapsed_simulation_seconds": 11.0,
+      "physics_stable": true
+    },
+    {
+      "python": "3.14.8",
+      "platform": "Linux",
+      "driver": "dummy",
+      "view": "neural",
+      "replay": true,
+      "frames": 600,
+      "resolution": [
+        1280,
+        720
+      ],
+      "mean_ms": 1.535871454931718,
+      "p95_ms": 1.880103001894895,
+      "max_ms": 3.1112719989323523,
+      "elapsed_simulation_seconds": 11.0,
+      "physics_stable": true
+    },
+    {
+      "python": "3.14.8",
+      "platform": "Linux",
+      "driver": "dummy",
+      "view": "training",
+      "replay": true,
+      "frames": 600,
+      "resolution": [
+        1280,
+        720
+      ],
+      "mean_ms": 1.398151598489979,
+      "p95_ms": 1.728013998217648,
+      "max_ms": 3.5432399999990594,
+      "elapsed_simulation_seconds": 11.0,
+      "physics_stable": true
+    },
+    {
+      "python": "3.14.8",
+      "platform": "Linux",
+      "driver": "dummy",
+      "view": "split",
+      "replay": true,
+      "frames": 600,
+      "resolution": [
+        1280,
+        720
+      ],
+      "mean_ms": 2.3223862183598007,
+      "p95_ms": 2.571050001279218,
+      "max_ms": 3.3291789986833464,
+      "elapsed_simulation_seconds": 11.0,
+      "physics_stable": true
+    }
+  ],
+  "sequential_generation": {
+    "population": 8,
+    "seeds": [
+      0,
+      17,
+      42
+    ],
+    "episode_duration": 12.0,
+    "wall_seconds": 9.408607669000048,
+    "candidate_seed_episodes": 24,
+    "best_score": 0.04811909122991628
+  },
+  "notes": "Linux cloud CPU and SDL dummy measurements; not native Windows/Iris Xe verification. Generation benchmark evaluates the next population without changing saved reference artifacts."
+}

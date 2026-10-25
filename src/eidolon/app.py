@@ -1,6 +1,7 @@
 """Own the desktop lifecycle, events, and coordination of updates and drawing."""
 
 from time import perf_counter
+from pathlib import Path
 
 import pygame
 
@@ -9,11 +10,26 @@ from eidolon.behavior import Controller
 from eidolon.rendering import ChamberRenderer
 from eidolon.simulation import Simulation
 from eidolon.timing import FixedStepClock
+from eidolon.laboratory import LaboratoryRenderer, VIEWS
 
 
 class Application:
-    def __init__(self, config: AppConfig | None = None, controller: Controller | None = None) -> None:
+    def __init__(self, config: AppConfig | None = None, controller: Controller | None = None, *, brain=None) -> None:
         self.config = config if config is not None else AppConfig()
+        self.view = self.config.view
+        self.laboratory = None
+        self.saved_metrics = None
+        if self.config.training_path:
+            from eidolon.evolution import load_metrics
+            path = Path(self.config.training_path)
+            self.metrics_path = path / "metrics.json" if path.is_dir() else path
+            self.saved_metrics = load_metrics(self.metrics_path)
+        if self.config.brain_path:
+            from eidolon.muscle_controller import NeuralMuscleController
+            from eidolon.replay import MuscleReplay
+            self.simulation = MuscleReplay(brain if brain is not None else NeuralMuscleController.load(self.config.brain_path),
+                                           seed=self.config.seed, body=self.config.body)
+            return
         if controller is None and self.config.controller == "neural":
             from eidolon.neural_controller import NeuralController
 
@@ -36,6 +52,12 @@ class Application:
             self.simulation.release_grab()
         elif ((event.type == pygame.MOUSEBUTTONDOWN and event.button == 1)
               or (event.type == pygame.MOUSEMOTION and self.simulation.colony.grab is not None)):
+            if self.view not in ("simulation", "split"):
+                return
+            if self.view == "split":
+                if event.pos[0] >= size[0] // 2 and self.simulation.colony.grab is None:
+                    return
+                size = (size[0] // 2, size[1])
             world = self.simulation.world_config
             camera = ChamberRenderer.camera_for_window(size, (world.width, world.height))
             position = camera.screen_to_world(event.pos)
@@ -43,6 +65,12 @@ class Application:
                 self.simulation.begin_grab(position, padding=8 / camera.scale)
             else:
                 self.simulation.move_grab(position)
+
+    def _switch_view(self, view):
+        self.view = view
+        if self.laboratory is not None:
+            self.laboratory.view = view
+        self.simulation.release_grab()
 
     def run(self) -> None:
         """Run until the window closes or Escape is pressed; always release SDL."""
@@ -55,6 +83,7 @@ class Application:
             )
             pygame.display.set_caption("EIDOLON — Simulation Chamber")
             renderer = ChamberRenderer(show_nodes=self.config.show_nodes)
+            self.laboratory = LaboratoryRenderer(renderer, view=self.view, metrics=self.saved_metrics)
             simulation_clock = FixedStepClock(self.config)
             frame_limiter = pygame.time.Clock()
             previous_time = perf_counter()
@@ -66,6 +95,16 @@ class Application:
                         running = False
                     elif event.type == pygame.KEYDOWN:
                         self._muscle_key(event)
+                        if event.key in (pygame.K_F1, pygame.K_F2, pygame.K_F3, pygame.K_F4):
+                            self._switch_view(VIEWS[event.key - pygame.K_F1])
+                        elif event.key == pygame.K_F5 and self.config.training_path:
+                            from eidolon.evolution import load_metrics
+                            try:
+                                self.saved_metrics = load_metrics(self.metrics_path)
+                                self.laboratory.metrics = self.saved_metrics
+                                self.laboratory.metrics_error = None
+                            except (OSError, ValueError) as error:
+                                self.laboratory.metrics_error = str(error)
                         if event.key == pygame.K_ESCAPE:
                             running = False
                         elif event.key == pygame.K_SPACE:
@@ -93,7 +132,11 @@ class Application:
                             pygame.RESIZABLE,
                         )
                     elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION):
-                        self._pointer_event(event, surface.get_size())
+                        if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                                and self.laboratory.select_at(event.pos, surface.get_size())):
+                            self._switch_view(self.laboratory.view)
+                        else:
+                            self._pointer_event(event, surface.get_size())
                     elif event.type in (pygame.WINDOWFOCUSLOST, pygame.WINDOWLEAVE):
                         self.simulation.release_grab()
                         self.simulation.relax_muscles()
@@ -103,7 +146,7 @@ class Application:
                 now = perf_counter()
                 simulation_clock.advance(now - previous_time, self.simulation.update)
                 previous_time = now
-                renderer.draw(surface, self.simulation, simulation_clock.interpolation_alpha)
+                self.laboratory.draw(surface, self.simulation, simulation_clock.interpolation_alpha)
                 pygame.display.flip()
                 frame_limiter.tick(self.config.max_fps)
         finally:

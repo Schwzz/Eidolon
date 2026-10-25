@@ -30,3 +30,4 @@ Desktop.ini
 
 # Local neural parameter snapshots (application configuration stays in code)
 /models/
+/runs/

@@ -1,0 +1,107 @@
+{
+  "notes": "Stability-only checks: same weights, 60-second horizon and target 400, seeds 101/102 in both bodies. Not the reference fitness protocol; detailed-body policy is out of distribution.",
+  "results": {
+    "simple": {
+      "score": -0.7045940378224461,
+      "distance": 1.8666457256293825,
+      "energy": 26.960949273492552,
+      "stable": 1.0,
+      "success": 0.0,
+      "episodes": [
+        {
+          "seed": 101,
+          "body": "simple",
+          "nodes": 10,
+          "bonds": 17,
+          "elapsed_seconds": 60.0,
+          "physics_ticks": 7200,
+          "distance": 2.573332013128379,
+          "target_progress": 2.573332013128379,
+          "target_distance": 400,
+          "reward": -0.48676829236483937,
+          "muscle_energy": 22.54341445321638,
+          "stable": true,
+          "reached_target": false,
+          "components": 1,
+          "peak_components": 1,
+          "floor_contacts": 3,
+          "terminated": false,
+          "truncated": true,
+          "propulsion_enabled": false
+        },
+        {
+          "seed": 102,
+          "body": "simple",
+          "nodes": 10,
+          "bonds": 17,
+          "elapsed_seconds": 60.0,
+          "physics_ticks": 7200,
+          "distance": 1.159959438130386,
+          "target_progress": 1.159959438130386,
+          "target_distance": 400,
+          "reward": -0.9224197832800528,
+          "muscle_energy": 31.378484093768726,
+          "stable": true,
+          "reached_target": false,
+          "components": 1,
+          "peak_components": 1,
+          "floor_contacts": 3,
+          "terminated": false,
+          "truncated": true,
+          "propulsion_enabled": false
+        }
+      ]
+    },
+    "detailed": {
+      "score": -0.9062681361298732,
+      "distance": -0.4436248999468262,
+      "energy": 28.168370360666913,
+      "stable": 1.0,
+      "success": 0.0,
+      "episodes": [
+        {
+          "seed": 101,
+          "body": "detailed",
+          "nodes": 88,
+          "bonds": 226,
+          "elapsed_seconds": 60.0,
+          "physics_ticks": 7200,
+          "distance": -4.988185166853896,
+          "target_progress": -4.988185166853896,
+          "target_distance": 400,
+          "reward": -1.144354672038473,
+          "muscle_energy": 27.773377122733635,
+          "stable": true,
+          "reached_target": false,
+          "components": 1,
+          "peak_components": 1,
+          "floor_contacts": 10,
+          "terminated": false,
+          "truncated": true,
+          "propulsion_enabled": false
+        },
+        {
+          "seed": 102,
+          "body": "detailed",
+          "nodes": 85,
+          "bonds": 215,
+          "elapsed_seconds": 60.0,
+          "physics_ticks": 7200,
+          "distance": 4.100935366960243,
+          "target_progress": 4.100935366960243,
+          "target_distance": 400,
+          "reward": -0.6681816002212734,
+          "muscle_energy": 28.563363598600187,
+          "stable": true,
+          "reached_target": false,
+          "components": 1,
+          "peak_components": 1,
+          "floor_contacts": 8,
+          "terminated": false,
+          "truncated": true,
+          "propulsion_enabled": false
+        }
+      ]
+    }
+  }
+}

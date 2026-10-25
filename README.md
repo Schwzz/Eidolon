@@ -1,20 +1,21 @@
 # EIDOLON
 
-An experimental artificial-life sandbox for Windows desktop. **Phase 2B.1:
-Simplified Body & Training Laboratory** adds a ten-node body and deterministic,
-headless locomotion episodes with observations, muscle actions, and rewards.
+An experimental artificial-life sandbox for Windows desktop. **Phase 2B.2:
+Evolutionary Training & Laboratory Tabs** adds a separate neural muscle brain,
+sequential population-based weight optimization, checkpoint/resume, and views
+for the simulation, actual neural activity, and saved training results.
 Eight controllable material regions deform existing bonds and can move the body
 through floor contact with compatibility propulsion disabled. Survival
 rules remain the default, and the seeded NumPy neural controller is retained.
 The biomass appearance, grabbing, tearing/reconnection, energy, growth,
 starvation, fixed world, and model format remain.
 
-There is no training, learning, memory, evolution, reproduction, or second
-organism. Neural weights are initially random; neural mode is an experiment,
-not a trained survival policy. No ML frameworks, pretrained models, LLMs, cloud
+Muscle weights can be optimized through mutation and selection. There is no
+reinforcement learning algorithm, cognitive memory, body-structure evolution,
+reproduction, or second organism. The original steering network remains untrained.
+No ML frameworks, externally pretrained models, LLMs, cloud
 APIs, credentials, or network connection are required after installation.
-The laboratory evaluates actions and rewards; it does not optimize weights or run
-reinforcement learning algorithms. Reaching/gripping is outside this phase.
+Reaching/gripping and food-seeking training are outside this phase.
 
 ## Windows setup (PowerShell)
 
@@ -288,7 +289,8 @@ simulation.relax_muscles()
 simulation.reset()  # Same mesh, assignments, relaxed actions, food, and RNG state.
 ```
 
-No network is trained, replaced, or automatically mapped to eight outputs.
+The original steering network is not trained, replaced, or mapped to eight outputs;
+the evolutionary muscle policy described below is separate.
 For isolated muscle movement use `propulsion_enabled=False` or a muscle-test mode;
 normal compatibility mode can intentionally combine its old drive with muscle actions.
 Detached fragments retain their muscle regions and shared biology. Nearby contact
@@ -388,8 +390,121 @@ This is an experimental reward design, not an exploitation-proof or calibrated
 task. Locomotion is slow and seed/pattern-dependent; fixed demonstrations can have
 negative reward or move away from the target. Distant fragments lack assisted
 recovery with propulsion disabled. Training episodes have no mouse input, while
-the normal application retains grabbing and recovery. No optimizer, replay buffer,
-reward training algorithm, extra organism, or graphical dashboard is included.
+the normal application retains grabbing and recovery. This episode API itself
+does not optimize weights; the separate evolutionary trainer below drives it.
+
+## Evolutionary muscle training
+
+`NeuralMuscleController` uses the same 30 normalized observations and eight
+independent [0, 1] muscle actions. Its default network is **30→16→8**, with **632
+float64 parameters** and tanh in every layer. Outputs map through `(tanh + 1)/2`.
+One or two hidden layers of 1–32 units are configurable. The existing **12→16→2**
+steering controller and its version-1 network JSON files are unchanged.
+
+Training evaluates each candidate sequentially across every configured seed,
+ranks by mean episode reward, keeps the best elites unchanged, and fills the
+population by choosing elite parents and adding masked Gaussian mutations to
+weights/biases. Defaults: population 12, three elites, mutation probability 0.2,
+standard deviation 0.15, and parameters clipped to [−5, 5]. Stable index order
+breaks ties. Only neural parameters evolve; body, physics, actions, and rewards
+stay fixed. No food or starvation systems run in these episodes.
+
+PowerShell examples (the first command reproduces the reference experiment):
+
+```powershell
+.\.venv\Scripts\python.exe -m eidolon.evolve train --output runs\demo --generations 20 --population 8 --elites 2 --seed 123 --seeds 0 17 42 --duration 12 --target-distance 20 --hidden-layers 16
+.\.venv\Scripts\python.exe -m eidolon.evolve evaluate --brain runs\demo\best.json --seeds 101 102 103 104 105
+.\.venv\Scripts\python.exe -m eidolon.evolve evaluate --brain runs\demo\best.json --baseline-brain runs\demo\initial-best.json --seeds 101 102 103 104 105 --compare --output runs\demo\heldout.json
+.\.venv\Scripts\python.exe -m eidolon.evolve resume --checkpoint runs\demo\checkpoint.json --generations 5
+.\.venv\Scripts\python.exe -m eidolon --brain runs\demo\best.json --training-run runs\demo --view split --seed 101
+```
+
+`eidolon-evolve` is the equivalent installed command. New training refuses to
+overwrite another run's artifact files. Resume uses all saved settings and takes
+an **additional** generation count; `--output runs\continued` can save continuation
+to a fresh directory. Candidate evaluation is CPU-only and sequential; larger
+populations, detailed bodies, longer episodes, and more seeds multiply runtime.
+Start with a small run. `--body detailed`, `--mutation-std`, and `--mutation-rate`
+are also available. The GUI never starts heavy training.
+
+After each completed generation the run directory contains:
+
+- `best.json`: muscle-brain bundle, network parameters, exact episode settings,
+  ordered observation schema, and training-seed provenance.
+- `initial-best.json`: the first unmutated population's champion, selected on the
+  same training seeds, for an initialization baseline.
+- `metrics.json`: configuration and completed generation/candidate metrics.
+- `checkpoint.json`: next population, champions, completed history, configuration,
+  and full PCG64 RNG state, allowing exact continuation in the same environment.
+
+Files use bounded, validated UTF-8 JSON with no executable serialization. Each
+file is replaced atomically. The checkpoint is authoritative if interruption
+occurs between artifact writes; resume from its last completed generation.
+Ordinary `runs/` and `models/` output is Git-ignored. Reproducibility assumes the
+same Python/NumPy/platform and fixed settings; cross-platform bitwise equivalence
+has not been verified. Changing evaluation seeds never changes saved weights.
+
+`--compare` evaluates the loaded policy, idle, seeded random actions, and the
+predefined scripted pattern on identical worlds/settings. `--baseline-brain`
+adds the initial champion. Reports include per-seed results and `held_out`, which
+is true only when all evaluation seeds are absent from known training seeds.
+Do not choose a champion on held-out scores. Evaluate on more seeds/horizons
+before claiming a robust gait or generalization.
+
+A small completed experiment is included in [experiments/phase2b2](experiments/phase2b2/README.md),
+including its resume checkpoint. Twenty generations used population 8, two elites,
+training seeds 0/17/42, 12-second episodes, and a target 20 units right.
+Training champion reward improved from **−0.1772 to +0.0481**. On seeds 101–105:
+
+| Policy | Mean reward | Mean X displacement | Mean muscle energy | Targets reached |
+| --- | --- | --- | --- | --- |
+| Trained brain | −0.0368 | +2.014 | 5.727 | 0/5 |
+| Initial population champion | −0.1564 | +0.595 | 5.626 | 0/5 |
+| Idle | −0.1193 | −0.010 | 0 | 0/5 |
+| Random actions | −0.3443 | −0.291 | 13.407 | 0/5 |
+| Scripted pattern | +0.2577 | +8.904 | 7.088 | 0/5 |
+
+All evaluated episodes were stable. This demonstrates a small improvement over
+initialization and random/idle reward, with more physical progress than the
+initial champion. **It does not demonstrate solved locomotion:** the scripted
+pattern remains substantially better, and no policy reached the target. These
+are one run and five held-out seeds, not evidence of a reliable crawling gait.
+
+## Laboratory tabs and graphical brain replay
+
+Click the tabs or use **F1 Simulation**, **F2 Neural Network**, **F3 Training**,
+and **F4 Split View**. Tab changes do not reset or pause the running simulation;
+they release an active pointer grab. Space, R, +/−, Escape, and simulation-panel
+mouse interactions remain available. Split view maps the mouse through its own
+left-hand camera; resizing changes the viewport, not the physical body.
+
+The neural view draws the loaded network's actual layers, neurons, and weighted
+connections. Green/purple encode positive/negative weights and captured values;
+hover a neuron for its value and bias. Muscle networks label all 30 inputs,
+hidden layers, and eight muscle outputs. The old steering network shows its
+actual 12 inputs and two outputs instead. Values are captured during real
+inference and held between action intervals; rendering never evaluates a network
+or fabricates activity. Paused views identify the last sample. Rules/manual modes
+show no active network, and completed/dead episodes stop displaying live activity.
+
+The Training tab displays **saved, completed generations**, best/mean reward
+curves, and the top candidates from the last saved generation. `--training-run`
+accepts a run directory or metrics JSON. **F5** reloads a snapshot written by an
+external CLI process. It is not a live training dashboard and does not evaluate
+candidates in the window loop.
+
+`--brain` replays the exact headless episode integrator and action timing, with
+starvation disabled, rather than enabling compatibility drive in the survival
+sandbox. The saved physics settings are used; gravity/friction overrides are
+rejected. The model selects its saved body by default. Seed overrides support
+unseen-world replay. R repeats the episode, and completion freezes it until reset.
+Mouse interaction and a different `--body` remain possible but mark the replay
+**not a benchmark**. Normal rules/neural survival mode remains the default when
+`--brain` is omitted. To inspect the included reference brain immediately:
+
+```powershell
+.\.venv\Scripts\python.exe -m eidolon --brain experiments\phase2b2\best.json --training-run experiments\phase2b2 --view split --seed 101
+```
 
 ## Living biomass physics
 
@@ -570,6 +685,7 @@ light stamps are reused, and HUD label caching remains bounded.
 .\.venv\Scripts\python.exe tools\stress_colony.py --seed 17 --cycles 6 --scale 1.6
 .\.venv\Scripts\python.exe tools\stress_colony.py --seed 17 --cycles 6 --scale 1.6 --muscles
 .\.venv\Scripts\python.exe tools\stress_colony.py --body simple --seed 17 --cycles 6 --muscles
+.\.venv\Scripts\python.exe tools\benchmark_laboratory.py --brain experiments\phase2b2\best.json --training-run experiments\phase2b2 --view split --frames 600
 ```
 
 The benchmark measures uncapped physics/update/draw/presentation and reports node
@@ -588,7 +704,37 @@ post-settling displacement and passive-baseline-adjusted displacement, checking
 conservation, bounded motion, and complete relaxation. With friction zero and no
 side-wall contact, internal contractions should not move the horizontal mass center.
 
-Phase 2B.1 validation: **442 tests passed on both Python 3.12 and 3.14**.
+Phase 2B.2 validation: **484 tests passed on Python 3.12 and 3.14**, including exact
+checkpoint continuation, multi-seed evaluation, muscle brain validation, unchanged
+steering-model loading, no propulsion, headless/replay trajectory equivalence,
+actual activation snapshots, draw purity, tabs/camera/resize, and saved-metric
+reload. CLI/UI checks were rerun after final display/launch fixes. SDL lifecycle
+checks exercised all four views, pause/resize/reset, and clean shutdown with the
+saved reference brain.
+
+Linux / Python 3.14.8 / SDL dummy laboratory measurements at 1280 × 720, using the
+reference brain and metrics (600 measured frames after 60 warmup):
+
+| View | Mean ms/frame | p95 ms/frame | Max ms/frame |
+| --- | --- | --- | --- |
+| Simulation replay | 1.402 | 1.750 | 3.423 |
+| Neural Network | 1.536 | 1.880 | 3.111 |
+| Saved Training | 1.398 | 1.728 | 3.543 |
+| Split View | 2.322 | 2.571 | 3.329 |
+
+Physics and real neural decisions continued in every view. A sequential generation
+of eight candidates × three seeds × 12-second episodes took **9.41 seconds** on
+this cloud CPU, including reset/settling and inference. This is a throughput
+sample, not an i5/Windows guarantee. The 20-generation reference experiment
+evaluated **480 candidate/seed episodes (5,760 active simulation seconds)**; all
+reported stable. Measurements and the evaluation results are stored with the
+reference experiment. Native Windows/Iris Xe responsiveness remains unverified.
+Additional stability-only checks kept the same brain weights and ran seeds
+101/102 for 60 seconds in each body mode, with a distant target to avoid early
+completion. All four episodes stayed stable through the time limit (240 simulated
+seconds). These altered-horizon/body checks are not the held-out fitness protocol.
+
+Previous Phase 2B.1 body-rendering reference:
 Linux / Python 3.14.8 / NumPy 2.5.4 / SDL dummy measurements at 1280 × 720
 (600 measured frames after 60 warmup frames per run):
 
@@ -689,6 +835,12 @@ src/eidolon/
   muscles.py           Eight material regions, bounded activations, energy, test pattern
   training.py          Fixed-action headless episodes, observations, signed rewards
   train.py             JSON experiment CLI and throughput measurements; no optimizer
+  muscle_controller.py Separate 30-input/eight-muscle policy and brain bundle
+  evolution.py         Sequential mutation/selection, evaluation, checkpoints
+  evolve.py            Training/resume/held-out comparison CLI
+  experiment_io.py     Bounded JSON and atomic experiment snapshots
+  replay.py            Graphical adapter over exact headless episode stepping
+  laboratory.py        Tabs, actual network snapshots, saved reward graphs
   colony_rendering.py  Flat membrane from physical node positions
   biology.py           Colony-wide biological state
   behavior.py          Replaceable sensory/decision interface and survival rules
@@ -715,5 +867,5 @@ python3 -m venv .venv
 
 This is a simplified 2D elastic graph, not a continuum fluid or a biological
 material model. Recovery can be interrupted by death; dead tissue settles
-passively rather than continuing to reconnect. Learning and evolution remain
-outside this milestone. **Phase 2B.2 has not been started.**
+passively rather than continuing to reconnect. Body evolution, cognitive memory,
+and reinforcement learning are outside this milestone. **Phase 2B.3 has not been started.**

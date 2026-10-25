@@ -51,7 +51,7 @@ class ChamberRenderer:
         )
         mode = (f"MUSCLE {simulation.muscle_test.upper()}" if simulation is not None and simulation.muscle_test
                 else simulation.controller_name.upper() if simulation is not None else "")
-        caption = "PHASE 2B.1" + (f" | {mode}" if mode else "")
+        caption = "PHASE 2B.2" + (f" | {mode}" if mode else "")
         phase = self._label(caption, self.ACCENT)
         surface.blit(phase, (width - phase.get_width() - 24, 29))
 
@@ -81,12 +81,22 @@ class ChamberRenderer:
                                        tuple(round(v) for v in camera.world_to_screen((x, y))), 2, 1)
             life = simulation.life
             energy = f"ENERGY {life.energy:.0f}/{life.max_energy:.0f}   AGE {life.age_seconds:.0f}s"
+            replay = getattr(simulation, "is_replay", False)
+            if replay:
+                metrics = simulation.environment.metrics()
+                energy = f"REWARD {metrics['reward']:+.3f}   MUSCLE E {metrics['muscle_energy']:.2f}"
             surface.blit(self._label(energy, self.MUTED), (40, height - 91))
-            status_label = self._label("ALIVE" if life.alive else "DEAD", self.ACCENT if life.alive else (184, 106, 118))
+            status = ("UNSTABLE" if not metrics["stable"] else "COMPLETE" if simulation.environment.done else "REPLAY") if replay else "ALIVE" if life.alive else "DEAD"
+            status_label = self._label(status, self.ACCENT if life.alive and status != "UNSTABLE" else (184, 106, 118))
             surface.blit(status_label, (width - status_label.get_width() - 40, height - 91))
             growth = f"SIZE {life.body_scale:.2f}x   FOOD {len(simulation.world.foods)}"
+            if replay:
+                growth = ("INTERACTIVE: NOT BENCHMARK" if simulation.intervened else
+                          f"DX {simulation.muscle_displacement:+.2f}   TIME {simulation.elapsed_seconds:.1f}s")
             surface.blit(self._label(growth, self.MUTED), (40, height - 68))
             speed = f"{'PAUSED' if simulation.paused else 'RUNNING'} {simulation.speed:.2f}x"
+            if replay and simulation.environment.done:
+                speed = "FINISHED | R Reset"
             speed_label = self._label(speed, self.ACCENT)
             surface.blit(speed_label, (width - speed_label.get_width() - 40, height - 68))
             controls = "LMB Grab  SPACE Pause  R Reset  +/-"

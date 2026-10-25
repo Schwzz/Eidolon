@@ -264,7 +264,7 @@ def test_muscle_hud_draws_at_resized_sizes_without_mutating_physics(size):
         before = state(simulation)
         renderer = ChamberRenderer()
         renderer.draw(pygame.Surface(size), simulation)
-        assert ("PHASE 2B.1 | MUSCLE MANUAL", renderer.ACCENT) in renderer._labels
+        assert ("PHASE 2B.2 | MUSCLE MANUAL", renderer.ACCENT) in renderer._labels
         assert state(simulation) == before
     finally:
         pygame.quit()

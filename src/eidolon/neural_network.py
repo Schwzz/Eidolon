@@ -79,6 +79,7 @@ class FeedForwardNetwork:
             weights.append(weight)
             biases.append(bias)
         self._weights, self._biases = tuple(weights), tuple(biases)
+        self.last_activations = None
 
     @property
     def layers(self) -> tuple[int, ...]:
@@ -93,7 +94,15 @@ class FeedForwardNetwork:
         return self._biases
 
     def forward(self, inputs) -> np.ndarray:
+        self.last_activations = None
+        trace = self.forward_with_activations(inputs)
+        self.last_activations = trace  # Debug snapshot only; never fed back into inference.
+        return trace[-1]
+
+    def forward_with_activations(self, inputs) -> tuple[np.ndarray, ...]:
+        """Return the actual input and layer values from one forward pass."""
         values = _array(inputs, (self.layers[0],), "inputs")
+        trace = [values]
         try:
             with np.errstate(over="raise", invalid="raise"):
                 for weight, bias in zip(self.weights, self.biases):
@@ -101,9 +110,11 @@ class FeedForwardNetwork:
                     if not np.isfinite(values).all():
                         raise ValueError("network inference produced nonfinite values")
                     values = np.tanh(values)
+                    values.setflags(write=False)
+                    trace.append(values)
         except FloatingPointError as error:
             raise ValueError("network inference overflowed; check input and parameter magnitudes") from error
-        return values
+        return tuple(trace)
 
     def to_parameters(self) -> dict:
         """Return independent, JSON-compatible parameter data."""
@@ -126,6 +137,7 @@ class FeedForwardNetwork:
             raise ValueError("network needs one weight matrix and bias vector per layer transition")
         network = cls.__new__(cls)
         network._layers = layers
+        network.last_activations = None
         network._weights = tuple(_array(weight, (b, a), f"weights[{index}]")
                                  for index, (weight, a, b) in enumerate(zip(weights, layers, layers[1:])))
         network._biases = tuple(_array(bias, (size,), f"biases[{index}]")

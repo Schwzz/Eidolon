@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eidolon"
-version = "0.10.0"
+version = "0.11.0"
 description = "An experimental artificial-life desktop sandbox — living biomass colony."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,6 +19,7 @@ dev = ["pytest>=8.3,<10"]
 [project.scripts]
 eidolon = "eidolon.__main__:main"
 eidolon-train = "eidolon.train:main"
+eidolon-evolve = "eidolon.evolve:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

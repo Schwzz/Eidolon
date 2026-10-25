@@ -134,8 +134,17 @@ class AppConfig:
     muscle_test: str | None = None
     body: str = "detailed"
     show_nodes: bool = False
+    brain_path: str | None = None
+    training_path: str | None = None
+    view: str = "simulation"
 
     def __post_init__(self) -> None:
+        if self.view not in ("simulation", "neural", "training", "split"):
+            raise ValueError("invalid laboratory view")
+        for name in ("brain_path", "training_path"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"{name} must be a nonempty path")
         BodyConfig(self.body)
         if not isinstance(self.show_nodes, bool):
             raise ValueError("show_nodes must be a boolean")
