@@ -9,6 +9,7 @@ from math import hypot, isclose, isfinite
 
 from eidolon.colony import Colony, MEMBRANE_RADIUS
 from eidolon.config import BodyConfig, MuscleConfig, PhysicsConfig
+from eidolon.muscle_senses import body_extent, muscle_observations
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,8 +155,7 @@ class LocomotionEnvironment:
         return self._done
 
     def _extent(self) -> tuple[float, float]:
-        return tuple(max(n.position[axis] + n.radius for n in self.colony.nodes)
-                     - min(n.position[axis] - n.radius for n in self.colony.nodes) for axis in (0, 1))
+        return body_extent(self.colony)
 
     def _valid_physics(self) -> bool:
         colony, settings = self.colony, self.config
@@ -177,28 +177,12 @@ class LocomotionEnvironment:
                    <= b.rest_length * colony.scale * 2.5 for b in colony.bonds)
 
     def observe(self) -> tuple[float, ...]:
-        colony, settings = self.colony, self.config
-        x, y = colony.material_center
-        vx, vy = colony.material_velocity
-        width, height = self._extent()
-        strains = [hypot(colony.nodes[b.first].position[0] - colony.nodes[b.second].position[0],
-                         colony.nodes[b.first].position[1] - colony.nodes[b.second].position[1])
-                   / (b.rest_length * colony.scale) - 1 for b in colony.bonds]
-        energy_bound = settings.muscles.holding_cost + settings.muscles.contraction_cost * settings.muscles.contraction_rate
-        clip = lambda v: min(1.0, max(-1.0, v))
-        return tuple(map(clip, (
-            x / settings.world_size[0] * 2 - 1, y / settings.world_size[1] * 2 - 1,
-            vx / colony.physics.max_speed, vy / colony.physics.max_speed,
-            (self._start_x + settings.target_distance - x) / abs(settings.target_distance),
-            colony.floor_contacts / len(colony.nodes),
-            width / self._initial_extent[0] - 1, height / self._initial_extent[1] - 1,
-            sum(strains) / max(1, len(strains)), max(map(abs, strains), default=0),
-            (len(colony.components) - 1) / (len(colony.nodes) - 1),
-            max(0.0, 1 - self.elapsed_seconds / settings.duration),
-            *colony.muscles.activations, *colony.muscles.targets,
-            self._last_energy / max(1e-9, energy_bound * settings.action_interval),
-            self._energy / max(1e-9, energy_bound * settings.duration),
-        )))
+        settings = self.config
+        return muscle_observations(self.colony, world_size=settings.world_size,
+            target_x=self._start_x + settings.target_distance, target_distance=settings.target_distance,
+            initial_extent=self._initial_extent, time_remaining=max(0.0, 1 - self.elapsed_seconds / settings.duration),
+            last_energy=self._last_energy, total_energy=self._energy, action_interval=settings.action_interval,
+            energy_horizon=settings.duration)
 
     def metrics(self) -> dict:
         return dict(seed=self.seed, body=self.config.body, nodes=len(self.colony.nodes), bonds=len(self.colony.bonds),

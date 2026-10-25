@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from math import atan2, ceil, cos, hypot, isfinite, pi, sin, tau
+from typing import TYPE_CHECKING
 
 from eidolon.behavior import Controller, Decision, Senses, SurvivalRules
 from eidolon.biology import LifeState, SPRITE_EXTENT
@@ -9,7 +10,11 @@ from eidolon.config import BodyConfig, LifeConfig, MuscleConfig, PhysicsConfig, 
 from eidolon.colony import Colony, MEMBRANE_RADIUS
 from eidolon.organism import Symbiote
 from eidolon.muscles import wave_activations
+from eidolon.muscle_senses import body_extent, muscle_observations
 from eidolon.world import World
+
+if TYPE_CHECKING:
+    from eidolon.muscle_controller import NeuralMuscleController
 
 
 class Simulation:
@@ -21,6 +26,7 @@ class Simulation:
         physics_config: PhysicsConfig | None = None,
         muscle_config: MuscleConfig | None = None, muscle_test: str | None = None,
         body: str = "detailed",
+        muscle_controller: "NeuralMuscleController | None" = None,
     ) -> None:
         self.seed = seed
         self.body_config = BodyConfig(body)
@@ -31,9 +37,12 @@ class Simulation:
             raise ValueError("muscle_test must be 'manual', 'wave', or None")
         self.muscle_test = muscle_test
         self.muscle_config = muscle_config if muscle_config is not None else MuscleConfig()
-        if muscle_test is not None and self.physics_config.propulsion_enabled:
+        if muscle_controller is not None and (controller is not None or muscle_test is not None):
+            raise ValueError("a muscle brain cannot be combined with steering or manual muscle controllers")
+        self.muscle_controller = muscle_controller
+        if (muscle_test is not None or muscle_controller is not None) and self.physics_config.propulsion_enabled:
             self.physics_config = replace(self.physics_config, propulsion_enabled=False)
-        self.controller = controller if controller is not None else SurvivalRules(seed)
+        self.controller = muscle_controller if muscle_controller is not None else controller if controller is not None else SurvivalRules(seed)
         self.organism = Symbiote(seed)  # Appearance/animation; no biological data.
         self._paused = False
         self.animation_speed = 1.0  # Kept as a compatibility name; scales all systems.
@@ -81,6 +90,11 @@ class Simulation:
                                   self.colony.center[1] + self.world_config.height - bottom - 2.0))
         self.life.position = self.colony.center
         self._initial_material_x = self.colony.material_center[0]
+        if self.muscle_controller is not None:
+            self.muscle_controller.clear_activity()
+            self._muscle_initial_extent = body_extent(self.colony)
+            self._next_muscle_action = 0.0
+            self._muscle_interval_energy = 0.0
         self.life.begin_step()
         self.steps = 0
         self.elapsed_seconds = 0.0
@@ -101,7 +115,26 @@ class Simulation:
             self.relax_muscles()
 
     def relax_muscles(self) -> None:
+        if self.muscle_controller is not None and self.life.alive:
+            return  # Pause/resize/focus changes must not replace held neural actions.
         self.colony.muscles.relax()
+
+    def _update_neural_muscles(self) -> None:
+        controller = self.muscle_controller
+        if self.life.age_seconds + 1e-10 < self._next_muscle_action:
+            return
+        settings = controller.episode
+        observations = muscle_observations(self.colony,
+            world_size=(self.world_config.width, self.world_config.height),
+            target_x=self._initial_material_x + settings.target_distance, target_distance=settings.target_distance,
+            initial_extent=self._muscle_initial_extent, time_remaining=1.0,
+            last_energy=self._muscle_interval_energy, total_energy=self.life.muscle_energy_spent,
+            action_interval=settings.action_interval, energy_horizon=settings.duration)
+        # There is no episode countdown, goal completion, reward, or termination.
+        # The saved duration is only the existing total-energy normalization scale.
+        self.set_muscle_activations(controller.act(observations))
+        self._muscle_interval_energy = 0.0
+        self._next_muscle_action += settings.action_interval
 
     def set_speed(self, speed: float) -> None:
         if not isfinite(speed) or not 0.25 <= speed <= 2.0:
@@ -150,7 +183,8 @@ class Simulation:
         self.world.begin_step()
         age_before = self.life.age_seconds
         # Keep movement/feeding stable for larger caller timesteps and at 2x.
-        count = max(1, ceil(elapsed / self.MAX_STEP - 1e-9))
+        maximum_step = min(self.MAX_STEP, self.muscle_controller.episode.timestep) if self.muscle_controller else self.MAX_STEP
+        count = max(1, ceil(elapsed / maximum_step - 1e-9))
         for _ in range(count):
             self._integrate(elapsed / count)
         self.elapsed_seconds += elapsed
@@ -182,8 +216,10 @@ class Simulation:
         self._eat()
         if self.muscle_test == "wave":
             self.set_muscle_activations(wave_activations(state.age_seconds))
+        if self.muscle_controller is not None:
+            self._update_neural_muscles()
         sensed_food = self.world.nearest_food(state.position, settings.sensing_radius)
-        decision = (Decision(state.direction, 0.0) if self.muscle_test is not None else self.controller.decide(Senses(
+        decision = (Decision(state.direction, 0.0) if self.muscle_test is not None or self.muscle_controller is not None else self.controller.decide(Senses(
             state.position, state.direction, state.age_seconds,
             state.energy / state.max_energy, state.collision_radius,
             (self.world_config.width, self.world_config.height), sensed_food,
@@ -207,6 +243,8 @@ class Simulation:
             state.direction = 0.0 if state.position[0] < self.world_config.width / 2 else pi
         state.age_seconds += dt
         state.muscle_energy_spent += self.colony.muscle_energy_used
+        if self.muscle_controller is not None:
+            self._muscle_interval_energy += self.colony.muscle_energy_used
         state.energy = max(0.0, state.energy - settings.metabolism * state.body_scale**2 * dt
                            - settings.movement_cost * traveled - self.colony.muscle_energy_used)
         if state.energy <= 1e-10:

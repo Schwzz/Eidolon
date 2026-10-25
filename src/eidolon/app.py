@@ -2,6 +2,7 @@
 
 from time import perf_counter
 from pathlib import Path
+from dataclasses import replace
 
 import pygame
 
@@ -26,9 +27,13 @@ class Application:
             self.saved_metrics = load_metrics(self.metrics_path)
         if self.config.brain_path:
             from eidolon.muscle_controller import NeuralMuscleController
-            from eidolon.replay import MuscleReplay
-            self.simulation = MuscleReplay(brain if brain is not None else NeuralMuscleController.load(self.config.brain_path),
-                                           seed=self.config.seed, body=self.config.body)
+            brain = brain if brain is not None else NeuralMuscleController.load(self.config.brain_path)
+            settings = brain.episode
+            self.simulation = Simulation(self.config.seed,
+                replace(self.config.world, width=settings.world_size[0], height=settings.world_size[1]),
+                replace(self.config.life, base_radius=settings.base_radius),
+                physics_config=settings.physics, muscle_config=settings.muscles,
+                body=self.config.body, muscle_controller=brain)
             return
         if controller is None and self.config.controller == "neural":
             from eidolon.neural_controller import NeuralController

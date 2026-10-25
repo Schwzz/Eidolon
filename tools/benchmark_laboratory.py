@@ -1,7 +1,7 @@
-"""Uncapped simulation/replay plus laboratory rendering; no training in the loop."""
+"""Uncapped continuous simulation plus laboratory rendering; no training in the loop."""
 
 import argparse
-from math import ceil
+from math import ceil, isfinite
 import json
 import os
 import platform
@@ -44,10 +44,11 @@ def main():
                 samples.append((perf_counter() - started) * 1000)
         ordered = sorted(samples)
         print(json.dumps(dict(python=platform.python_version(), platform=platform.system(), driver=pygame.display.get_driver(),
-                              view=args.view, replay=bool(args.brain), frames=len(samples), resolution=[1280, 720],
+                              view=args.view, replay=getattr(app.simulation, "is_replay", False), frames=len(samples), resolution=[1280, 720],
                               mean_ms=fmean(samples), p95_ms=ordered[ceil(len(samples) * 0.95) - 1], max_ms=max(samples),
                               elapsed_simulation_seconds=app.simulation.elapsed_seconds,
-                              physics_stable=app.simulation.environment.metrics()["stable"] if args.brain else True), indent=2))
+                              physics_stable=all(isfinite(v) for node in app.simulation.colony.nodes
+                                                 for v in (*node.position, *node.velocity))), indent=2))
     finally:
         pygame.quit()
 

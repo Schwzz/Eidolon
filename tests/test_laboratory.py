@@ -141,7 +141,8 @@ def test_brain_cli_defaults_to_saved_body_and_validates_files_before_window(tmp_
     apps = []
     monkeypatch.setattr(Application, "run", lambda app: apps.append(app))
     assert main(["--brain", str(path), "--seed", "101", "--view", "split"]) == 0
-    assert apps[0].simulation.is_replay and len(apps[0].simulation.colony.nodes) == 10
+    assert isinstance(apps[0].simulation, Simulation) and len(apps[0].simulation.colony.nodes) == 10
+    assert not getattr(apps[0].simulation, "is_replay", False)
     assert apps[0].simulation.seed == 101 and apps[0].view == "split"
     saved = policy()
     saved.episode = replace(saved.episode, seed=53)

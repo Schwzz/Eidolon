@@ -48,6 +48,10 @@ seeds 101/102, 60-second episodes, target 400, both body modes. All four complet
 stably. The detailed body and altered horizon are out of the training distribution;
 these checks establish stability, not locomotion quality.
 
+The graphical `--brain` command now runs continuously with normal survival biology.
+Use `eidolon.evolve evaluate` to reproduce the timed comparisons above. The saved
+brain, metrics, checkpoint, and historical benchmark data are unchanged.
+
 Cross-platform bitwise equivalence and native Windows performance are unverified.
 The episode API does not protect against every possible simulator exploit; this
 reward and the short-horizon evaluation protocol remain experimental.

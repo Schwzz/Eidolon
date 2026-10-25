@@ -19,7 +19,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--body", choices=("simple", "detailed"), default=None,
                         help="physics topology (desktop default: detailed; training default: simple)")
     parser.add_argument("--show-nodes", action="store_true", help="overlay subtle physics-node markers")
-    parser.add_argument("--brain", help="replay a saved 30-input muscle brain in its headless episode")
+    parser.add_argument("--brain", help="run a saved 30-input muscle brain in continuous survival simulation")
     parser.add_argument("--training-run", help="saved metrics JSON or run directory for the Training tab")
     parser.add_argument("--view", choices=("simulation", "neural", "training", "split"), default="simulation")
     parser.add_argument("--controller", choices=("rules", "neural"), default=defaults.controller,
@@ -42,7 +42,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if args.brain and (args.gravity is not None or args.floor_friction is not None):
-        parser.error("brain replay uses the physics settings saved in the brain")
+        parser.error("muscle brains use the physics settings saved in the brain")
     if args.brain and (args.controller != "rules" or args.muscle_test is not None
                       or any(value is not None for value in (args.network_seed, args.hidden_layers, args.load_network, args.save_network))):
         parser.error("--brain is separate from steering controllers and manual muscle-test options")

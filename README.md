@@ -470,7 +470,7 @@ initial champion. **It does not demonstrate solved locomotion:** the scripted
 pattern remains substantially better, and no policy reached the target. These
 are one run and five held-out seeds, not evidence of a reliable crawling gait.
 
-## Laboratory tabs and graphical brain replay
+## Laboratory tabs and continuous brain simulation
 
 Click the tabs or use **F1 Simulation**, **F2 Neural Network**, **F3 Training**,
 and **F4 Split View**. Tab changes do not reset or pause the running simulation;
@@ -485,7 +485,7 @@ hidden layers, and eight muscle outputs. The old steering network shows its
 actual 12 inputs and two outputs instead. Values are captured during real
 inference and held between action intervals; rendering never evaluates a network
 or fabricates activity. Paused views identify the last sample. Rules/manual modes
-show no active network, and completed/dead episodes stop displaying live activity.
+show no active network, and dead organisms stop displaying live activity.
 
 The Training tab displays **saved, completed generations**, best/mean reward
 curves, and the top candidates from the last saved generation. `--training-run`
@@ -493,18 +493,35 @@ accepts a run directory or metrics JSON. **F5** reloads a snapshot written by an
 external CLI process. It is not a live training dashboard and does not evaluate
 candidates in the window loop.
 
-`--brain` replays the exact headless episode integrator and action timing, with
-starvation disabled, rather than enabling compatibility drive in the survival
-sandbox. The saved physics settings are used; gravity/friction overrides are
-rejected. The model selects its saved body by default. Seed overrides support
-unseen-world replay. R repeats the episode, and completion freezes it until reset.
-Mouse interaction and a different `--body` remain possible but mark the replay
-**not a benchmark**. Normal rules/neural survival mode remains the default when
-`--brain` is omitted. To inspect the included reference brain immediately:
+`--brain` runs the saved network continuously in the normal survival simulation.
+Its saved episode duration and target crossing do not stop the organism. Food,
+regeneration, feeding, metabolism, muscle energy costs, growth, and starvation
+remain active. The brain controls muscles at its saved action interval, with
+compatibility propulsion disabled. Pause freezes the complete simulation;
+R restarts its normal seeded world, biological state, muscles, and neural activity.
+Tabs and resizing preserve the running simulation. Saved locomotion policies can
+still settle or die through normal energy depletion.
+
+The 30-value input schema is preserved. Without an episode deadline, the
+`time_remaining` input stays at the neutral value 1; the saved duration only
+scales cumulative muscle-energy observations. The saved target offset remains
+an input reference without a completion condition. Saved physics, muscle settings,
+and default body remain compatible. Gravity/friction overrides are rejected.
+Rules and the old steering controller remain available without `--brain`.
+
+Timed experiments, rewards, selection, checkpoints, and saved comparison results
+remain separate: use `eidolon.train` or `eidolon.evolve evaluate` for the original
+episode protocol. A continuous survival run includes biology and is not a timed
+evaluation benchmark. To observe the included brain:
 
 ```powershell
 .\.venv\Scripts\python.exe -m eidolon --brain experiments\phase2b2\best.json --training-run experiments\phase2b2 --view split --seed 101
 ```
+
+Continuous-launch regression validation: **491 tests passed on Python 3.12 and
+3.14**. SDL checks kept the saved brain active beyond its old 12-second cutoff,
+across all tabs and pause/resize/restart. Timed held-out evaluation still matches
+the published reference results exactly. Native Windows graphics remain unverified.
 
 ## Living biomass physics
 
@@ -704,7 +721,7 @@ post-settling displacement and passive-baseline-adjusted displacement, checking
 conservation, bounded motion, and complete relaxation. With friction zero and no
 side-wall contact, internal contractions should not move the horizontal mass center.
 
-Phase 2B.2 validation: **484 tests passed on Python 3.12 and 3.14**, including exact
+Original Phase 2B.2 validation: **484 tests passed on Python 3.12 and 3.14**, including exact
 checkpoint continuation, multi-seed evaluation, muscle brain validation, unchanged
 steering-model loading, no propulsion, headless/replay trajectory equivalence,
 actual activation snapshots, draw purity, tabs/camera/resize, and saved-metric
