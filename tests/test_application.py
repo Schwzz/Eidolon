@@ -27,7 +27,7 @@ def test_renderer_draws_empty_dark_chamber(size) -> None:
     [((800, 600), (800, 600)), ((100, 100), (480, 320))],
 )
 def test_launch_resize_update_render_and_close(monkeypatch, requested, expected) -> None:
-    app = Application(AppConfig(max_fps=0))
+    app = Application(AppConfig(mode="survival", max_fps=0))
     events = iter([
         [],
         [pygame.event.Event(pygame.VIDEORESIZE, w=requested[0], h=requested[1])],
@@ -62,7 +62,7 @@ def test_frame_limiter_uses_configured_limit(monkeypatch, max_fps) -> None:
     events = iter([[], [pygame.event.Event(pygame.QUIT)]])
     monkeypatch.setattr(pygame.event, "get", lambda: next(events))
     monkeypatch.setattr(pygame.time, "Clock", FrameLimiter)
-    Application(AppConfig(max_fps=max_fps)).run()
+    Application(AppConfig(mode="survival", max_fps=max_fps)).run()
     assert limits == [max_fps]
 
 
@@ -71,7 +71,7 @@ def test_escape_exits_before_drawing(monkeypatch) -> None:
         pygame.event, "get",
         lambda: [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)],
     )
-    app = Application()
+    app = Application(AppConfig(mode="survival"))
     app.run()
     assert app.simulation.steps == 0
     assert not pygame.display.get_init()
@@ -85,13 +85,13 @@ def test_cleanup_also_runs_when_rendering_fails(monkeypatch) -> None:
 
     monkeypatch.setattr(ChamberRenderer, "draw", fail_draw)
     with pytest.raises(RuntimeError, match="render failure"):
-        Application().run()
+        Application(AppConfig(mode="survival")).run()
     assert not pygame.display.get_init()
     assert not pygame.font.get_init()
 
 
 def test_animation_controls_pause_speed_and_restart(monkeypatch) -> None:
-    app = Application(AppConfig(seed=123, max_fps=0))
+    app = Application(AppConfig(mode="survival", seed=123, max_fps=0))
     key = lambda value: pygame.event.Event(pygame.KEYDOWN, key=value)
     events = iter([
         [], [key(pygame.K_SPACE)], [key(pygame.K_SPACE), key(pygame.K_EQUALS)],
@@ -130,5 +130,5 @@ def test_animation_speed_keys_stay_within_bounds(monkeypatch) -> None:
         speeds.append(simulation.animation_speed)
 
     monkeypatch.setattr(ChamberRenderer, "draw", record_draw)
-    Application(AppConfig(max_fps=0)).run()
+    Application(AppConfig(mode="survival", max_fps=0)).run()
     assert speeds == [0.25, 2.0]

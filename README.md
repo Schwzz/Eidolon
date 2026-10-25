@@ -1,12 +1,14 @@
 # EIDOLON
 
-An experimental artificial-life sandbox for Windows desktop. **Phase 2B.2:
-Evolutionary Training & Laboratory Tabs** adds a separate neural muscle brain,
-sequential population-based weight optimization, checkpoint/resume, and views
-for the simulation, actual neural activity, and saved training results.
+An experimental artificial-life sandbox for Windows desktop. **Live Learning**
+is the default desktop mode: watch real neural muscle candidates practice in
+repeatable episodes, automatically retry, and evolve through the existing
+sequential mutation/selection algorithm. The laboratory shows the simulation,
+actual neural activity, and live or saved training results.
 Eight controllable material regions deform existing bonds and can move the body
-through floor contact with compatibility propulsion disabled. Survival
-rules remain the default, and the seeded NumPy neural controller is retained.
+through floor contact with compatibility propulsion disabled. Normal Survival
+mode remains available, with rules as its default controller; the seeded NumPy
+steering controller is retained.
 The biomass appearance, grabbing, tearing/reconnection, energy, growth,
 starvation, fixed world, and model format remain.
 
@@ -49,14 +51,19 @@ same import name and should not share an environment.
 | Control | Action |
 | --- | --- |
 | Left mouse button, hold and move | Grab a nearby node; pull gently to stretch or firmly to tear local bonds; release to allow recovery |
-| Space | Pause/resume physics, biology, world clocks, and food regeneration |
-| R | Restart the complete seeded world, colony graph, and biological state; retain pause and speed |
+| Space | Pause/resume the current mode, including learning progress or survival systems |
+| R | Live Learning: retry the current attempt, retaining the population and completed evaluations. Survival: reset the seeded world and biology |
+| S | Stop/continue Live Learning, retaining progress |
+| N | Archive the current learning run and start a fresh population with the same settings |
+| L / top-right mode buttons | Switch Live Learning / Survival; retain each mode's state while inactive |
+| F1 / F2 / F3 / F4 | Simulation / Neural Network / Training / Split View |
 | − / + (or =), including numeric keypad | Change simulation speed in 0.25× steps, from 0.25× to 2× |
 | Escape / window close | Exit and release Pygame resources |
 | `--seed INTEGER` | Reproduce colony layout, masses, palette, food, and behavior |
 
 The default window is 1280 × 720; the minimum is 480 × 320. Ctrl+C also exits.
-The desktop retains the detailed body by default. `--body simple` selects exactly
+Live Learning always uses the existing simple body. Survival retains the
+detailed body by default. `--body simple` selects exactly
 **10 nodes and 17 initial bonds**: two five-node rows with horizontal rails, five
 vertical links, and alternating diagonal braces. At the default radius, spacing
 is 19.2 world units. Every muscle channel affects existing bonds, including four
@@ -71,11 +78,76 @@ Grabbing uses the current fit camera, including letterboxing. Empty clicks are
 ignored. Mouse release, leaving the window, loss of focus, resizing, pause,
 restart, death, and shutdown cancel the grab; press again to resume interaction.
 Dragging beyond the chamber clamps the target to the world boundary.
+Grabbing is available in Survival; learning episodes exclude external pointer
+forces so fitness reflects only the candidate's muscles. Eight muscle readouts
+remain visible in Simulation and Split View, including during neural control.
+They show actual physical activation percentages: `+` contracting, `-` relaxing,
+and `=` holding, compared with each muscle's requested activation.
 
 The same seed, settings, and input/update sequence reproduce the simulation.
 Colony generation, appearance colors, and food spawning use separate private
 random generators. Rendering consumes no random numbers and changes no physics
 state. Floating-point/raster results may differ across Python or platform versions.
+
+## Live Learning
+
+```powershell
+.\.venv\Scripts\python.exe -m eidolon
+.\.venv\Scripts\python.exe -m eidolon --mode live --live-run runs\my-live-run --seed 17 --view split
+.\.venv\Scripts\python.exe -m eidolon --mode survival
+```
+
+The visible organism is the candidate being evaluated, controlled by its actual
+**30→16→8** muscle network. Each new run defaults to six candidates, two elites,
+and two world seeds (`--seed` and the next integer). Each attempt passively
+settles for three simulation seconds, then acts for up to six seconds toward a
+target 20 world units right. The unchanged episode reward measures physical net
+progress, stability, and muscle-energy efficiency. There is no propulsion,
+automatic gait, fragment homing, food-seeking, or starvation in learning episodes.
+The fixed ten-node body and existing physics are unchanged.
+
+After each attempt, its real result is retained and the next candidate/seed
+starts automatically. After all twelve attempts, mean multi-seed scores drive
+the existing elite selection and weight mutation. A full default generation is
+about 108 simulation seconds plus transitions, unless targets finish early.
+No heavy population evaluation runs in the draw loop: each frame advances at
+most 24 fixed physics ticks within a default 4 ms work budget. If the machine
+falls behind, simulation time slows rather than skipping reward-bearing ticks.
+The only background worker writes checkpoints; it never evaluates candidates.
+Changing weights is real optimization, but **effective crawling is not
+guaranteed or demonstrated by this usability change**.
+
+The Simulation HUD shows generation, attempt, current reward, and best completed
+score. Neural Network shows the current candidate's actual inference, with
+settling/paused/stopped activity labeled explicitly. Training shows live state,
+completed-generation reward curves, candidate scores, and save status. Switching
+tabs never interrupts the attempt. Switching modes retains each session in
+memory and advances only the selected mode.
+
+Progress saves automatically after attempts, when stopping, and on clean exit.
+The default directory is `runs/live`, ignored by Git. Atomic `live.json` is the
+authoritative population/RNG/cursor snapshot; standard `checkpoint.json`,
+`metrics.json`, and champion files are also written for the existing CLI tools.
+One active save plus one newest pending save bounds disk work. A single-writer
+OS lock prevents the GUI and headless trainer from overwriting the same run.
+Save failures visibly stop learning instead of claiming success.
+
+Launching again with the same directory restores completed evaluations, neural
+weights, RNG state, and pause/stop flags. **An unfinished attempt restarts from
+its seeded beginning**; within-attempt node positions are not checkpointed.
+`R` retries without discarding learning. `N` first archives the previous snapshot
+and artifacts under `archive-001`, etc., then starts anew. The GUI can also open a
+standard simple-body `checkpoint.json` directory from headless training; saved
+settings take precedence over launch defaults. Use a fresh directory for a
+different experiment. Close the GUI before headless continuation of its run.
+Headless continuation repeats an unfinished generation from its saved
+population, then updates both checkpoint formats; subsequent GUI launches use
+the newer completed progress.
+
+Normal Survival is continuous, with feeding, growth, metabolism, and starvation;
+it never automatically resets. Existing explicit `--brain`, `--controller`,
+`--body`, or `--muscle-test` launches select Survival unless a mode is specified.
+Saved steering and muscle brains retain their existing formats and behavior.
 
 ## Controllers and neural parameters
 
@@ -425,7 +497,8 @@ an **additional** generation count; `--output runs\continued` can save continuat
 to a fresh directory. Candidate evaluation is CPU-only and sequential; larger
 populations, detailed bodies, longer episodes, and more seeds multiply runtime.
 Start with a small run. `--body detailed`, `--mutation-std`, and `--mutation-rate`
-are also available. The GUI never starts heavy training.
+are also available. Headless commands still evaluate full episodes sequentially;
+Live Learning advances the same evaluation incrementally in the window.
 
 After each completed generation the run directory contains:
 
@@ -487,11 +560,12 @@ inference and held between action intervals; rendering never evaluates a network
 or fabricates activity. Paused views identify the last sample. Rules/manual modes
 show no active network, and dead organisms stop displaying live activity.
 
-The Training tab displays **saved, completed generations**, best/mean reward
-curves, and the top candidates from the last saved generation. `--training-run`
-accepts a run directory or metrics JSON. **F5** reloads a snapshot written by an
-external CLI process. It is not a live training dashboard and does not evaluate
-candidates in the window loop.
+During Live Learning, Training displays current evaluation state and actual
+completed-generation metrics, updating automatically. In Survival with no live
+session, it displays **saved, completed generations**, best/mean reward curves,
+and top candidates. `--training-run` accepts a run directory or metrics JSON;
+**F5** reloads an external CLI snapshot in this saved-results view. Live training
+does not ask you to refresh. A retained inactive live session is labeled inactive.
 
 `--brain` runs the saved network continuously in the normal survival simulation.
 Its saved episode duration and target crossing do not stop the organism. Food,
@@ -509,9 +583,9 @@ an input reference without a completion condition. Saved physics, muscle setting
 and default body remain compatible. Gravity/friction overrides are rejected.
 Rules and the old steering controller remain available without `--brain`.
 
-Timed experiments, rewards, selection, checkpoints, and saved comparison results
-remain separate: use `eidolon.train` or `eidolon.evolve evaluate` for the original
-episode protocol. A continuous survival run includes biology and is not a timed
+Timed headless experiments and saved comparison results remain available through
+`eidolon.train` and `eidolon.evolve evaluate`. Live Learning uses timed attempts;
+a continuous Survival run includes biology and is not a timed
 evaluation benchmark. To observe the included brain:
 
 ```powershell
@@ -608,13 +682,20 @@ The fit camera letterboxes uniformly as needed. Resizing changes only display
 scale, never node positions, bond lengths, biological size, or world state.
 There are no pan/zoom controls in this milestone.
 
-Food appears as small green dots: initially 32, with a default cap of 64 and one
-regenerated every three simulation seconds. A full world discards missed spawns.
-Each resource is consumed once and provides 18 energy/nutrition units. Spawn
-clearance remains conservative so food stays accessible at maximum growth.
+In Survival, food appears as small green dots: initially 32, with a default cap
+of 64 and one regenerated every three simulation seconds. Food now spawns
+directly on the ground, with zero velocity. A seeded choice inside the largest
+free gap spreads resources without overlaps or awkward clusters. Default
+clearances are 64 units from side walls, eight extra units between food edges,
+and six extra units from the current biomass membrane. Crowded ground defers
+spawns rather than placing food inside the organism or another resource.
+A full world discards missed spawns. Each resource is consumed once and provides
+18 energy/nutrition units. `WorldConfig.food_distribution`, `food_spacing`,
+`food_wall_clearance`, and `food_body_clearance` configure placement; `"falling"`
+retains bounded, overlap-checked airborne spawning for future experiments.
 Resources have persistent position, velocity, radius, and mass (default 1,
-configurable with `WorldConfig.food_mass`). They fall from the seeded spawn
-region, land at `world.height - radius`, lose lateral speed through friction,
+configurable with `WorldConfig.food_mass`). Gravity still applies to displaced
+or airborne resources: they land at `world.height - radius`, lose lateral speed through friction,
 and sleep when stationary on the floor. Rendering interpolates previous/current
 food positions without changing the physics. Equal masses are not required for
 equal free-fall acceleration.
@@ -650,7 +731,7 @@ starvation demonstration, run this Python snippet with the installed interpreter
 from eidolon.app import Application
 from eidolon.config import AppConfig, WorldConfig
 
-Application(AppConfig(world=WorldConfig(
+Application(AppConfig(mode="survival", world=WorldConfig(
     initial_food=0, regeneration_interval=0,
 ))).run()
 ```
@@ -681,8 +762,9 @@ sizes. The terrarium and UI layout are unchanged.
 ## Performance and tests
 
 Target: **60 FPS at 1280 × 720**, Windows 11 / Python 3.14, Intel i5-1135G7,
-Iris Xe, 8 GB RAM. No fluid solver, physics engine, ML framework, workers, or new
-runtime dependencies were added. The solver handles a bounded particle graph;
+Iris Xe, 8 GB RAM. No fluid solver, physics engine, ML framework, or new runtime
+dependencies were added. One bounded I/O worker saves live progress; training
+evaluation remains sequential on the main thread. The solver handles a bounded particle graph;
 food queries scan the configured cap (64 by default). Local render buffers and
 light stamps are reused, and HUD label caching remains bounded.
 
@@ -703,6 +785,7 @@ light stamps are reused, and HUD label caching remains bounded.
 .\.venv\Scripts\python.exe tools\stress_colony.py --seed 17 --cycles 6 --scale 1.6 --muscles
 .\.venv\Scripts\python.exe tools\stress_colony.py --body simple --seed 17 --cycles 6 --muscles
 .\.venv\Scripts\python.exe tools\benchmark_laboratory.py --brain experiments\phase2b2\best.json --training-run experiments\phase2b2 --view split --frames 600
+.\.venv\Scripts\python.exe tools\benchmark_laboratory.py --mode live --view split --frames 7200
 ```
 
 The benchmark measures uncapped physics/update/draw/presentation and reports node
@@ -720,6 +803,29 @@ travel costs to isolate actuation; muscle energy costs remain enabled. It report
 post-settling displacement and passive-baseline-adjusted displacement, checking
 conservation, bounded motion, and complete relaxation. With friction zero and no
 side-wall contact, internal contractions should not move the horizontal mass center.
+
+Live Learning validation: **512 tests passed on Python 3.12 and 3.14**. New checks
+compare two incremental generations with headless training exactly, including
+weights, scores, and RNG state; cover resume, retries, archives, frame budgets,
+single-writer locks, failed/coalesced saves, actual neural/muscle readouts, mode
+and tab preservation, and grounded spawn clearances. Existing survival, physics,
+model compatibility, and headless tests remain passing. An SDL window lifecycle
+smoke test completed real generations, exercised tabs and controls, and restored
+saved progress after closing.
+
+Linux / Python 3.14.8 / SDL dummy **Live Learning** at 1280 × 720, after 60 warmup
+frames, including inference, physics, drawing, automatic resets, and saves:
+
+| View | Measured frames | Mean ms/frame | p95 ms/frame | Max ms/frame |
+| --- | --- | --- | --- | --- |
+| Simulation | 7,200 | 1.492 | 1.857 | 7.930 |
+| Split View | 7,200 | 2.527 | 2.923 | 9.083 |
+| Training | 1,800 | 1.125 | 1.398 | 5.980 |
+
+Simulation and Split each completed a full default generation and 14,494 physics
+ticks; all three runs remained stable. These are cloud CPU/display-driver
+measurements, **not native Windows/Iris Xe validation**. The laboratory benchmark
+uses a disposable run directory unless `--live-run` is supplied.
 
 Original Phase 2B.2 validation: **484 tests passed on Python 3.12 and 3.14**, including exact
 checkpoint continuation, multi-seed evaluation, muscle brain validation, unchanged
@@ -855,9 +961,11 @@ src/eidolon/
   muscle_controller.py Separate 30-input/eight-muscle policy and brain bundle
   evolution.py         Sequential mutation/selection, evaluation, checkpoints
   evolve.py            Training/resume/held-out comparison CLI
+  live_learning.py     Budgeted visible candidates, automatic retries, live progress
+  run_store.py         Single-writer locks and bounded atomic snapshot I/O
   experiment_io.py     Bounded JSON and atomic experiment snapshots
   replay.py            Graphical adapter over exact headless episode stepping
-  laboratory.py        Tabs, actual network snapshots, saved reward graphs
+  laboratory.py        Tabs, actual network snapshots, live/saved reward graphs
   colony_rendering.py  Flat membrane from physical node positions
   biology.py           Colony-wide biological state
   behavior.py          Replaceable sensory/decision interface and survival rules

@@ -67,8 +67,18 @@ class WorldConfig:
     food_radius: float = 5.0
     regeneration_interval: float = 3.0  # Zero disables regeneration.
     food_mass: float = 1.0
+    food_distribution: str = "ground"
+    food_spacing: float = 8.0  # Extra clearance between resource edges.
+    food_wall_clearance: float = 64.0
+    food_body_clearance: float = 6.0
 
     def __post_init__(self) -> None:
+        if self.food_distribution not in ("ground", "falling"):
+            raise ValueError("food_distribution must be 'ground' or 'falling'")
+        for name in ("food_spacing", "food_wall_clearance", "food_body_clearance"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
         for name in ("width", "height", "food_energy", "food_radius", "food_mass"):
             value = getattr(self, name)
             if not isfinite(value) or value <= 0:
@@ -137,8 +147,17 @@ class AppConfig:
     brain_path: str | None = None
     training_path: str | None = None
     view: str = "simulation"
+    mode: str = "auto"  # Plain launch learns; explicit brain/controller options retain Survival mode.
+    live_run: str = "runs/live"
+    live_budget_ms: float = 4.0
 
     def __post_init__(self) -> None:
+        if self.mode not in ("auto", "live", "survival"):
+            raise ValueError("mode must be auto, live, or survival")
+        if not isinstance(self.live_run, str) or not self.live_run.strip():
+            raise ValueError("live_run must be a nonempty path")
+        if not isfinite(self.live_budget_ms) or not 0 < self.live_budget_ms <= 12:
+            raise ValueError("live_budget_ms must be in (0, 12]")
         if self.view not in ("simulation", "neural", "training", "split"):
             raise ValueError("invalid laboratory view")
         for name in ("brain_path", "training_path"):

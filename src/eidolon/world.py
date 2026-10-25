@@ -1,7 +1,7 @@
 """Bounded world and a capped, reproducible food supply. No display imports."""
 
 from dataclasses import dataclass, field, replace
-from math import ceil, exp, hypot, isfinite
+from math import ceil, exp, hypot, isfinite, sqrt
 from random import Random
 
 from eidolon.config import PhysicsConfig, WorldConfig
@@ -27,9 +27,10 @@ class World:
     MAX_STEP = 1 / 120
 
     def __init__(self, config: WorldConfig, seed: int, spawn_margin: float,
-                 physics: PhysicsConfig | None = None) -> None:
+                 physics: PhysicsConfig | None = None, *, exclusions=None) -> None:
         self.config = config
         self.physics = physics if physics is not None else PhysicsConfig()
+        self.exclusions = exclusions
         self.spawn_margin = max(spawn_margin, config.food_radius)
         if not isfinite(self.spawn_margin) or self.spawn_margin * 2 >= min(config.width, config.height):
             raise ValueError("world must have room for the fully grown organism and food")
@@ -45,10 +46,26 @@ class World:
         if len(self.foods) >= self.config.food_capacity:
             return None
         margin = self.spawn_margin
+        if self.config.food_distribution == "ground":
+            position = self._ground_position()
+            if position is None:
+                return None  # Crowded ground defers a spawn; it never forces an overlap.
+        else:
+            position = None
+            for _ in range(32):
+                candidate = (self._random.uniform(margin, self.config.width - margin),
+                             self._random.uniform(margin, self.config.height - margin))
+                obstacles = [(f.position[0], f.position[1], f.radius + self.config.food_spacing) for f in self.foods]
+                if self.exclusions is not None:
+                    obstacles.extend((x, y, size + self.config.food_body_clearance) for x, y, size in self.exclusions())
+                if all(hypot(candidate[0] - x, candidate[1] - y) >= self.config.food_radius + size for x, y, size in obstacles):
+                    position = candidate
+                    break
+            if position is None:
+                return None
         food = Food(
             self._next_id,
-            (self._random.uniform(margin, self.config.width - margin),
-             self._random.uniform(margin, self.config.height - margin)),
+            position,
             self.config.food_energy,
             self.config.food_radius,
             self.config.food_mass,
@@ -56,6 +73,39 @@ class World:
         self._next_id += 1
         self.foods.append(food)
         return food
+
+    def _ground_position(self):
+        radius = self.config.food_radius
+        clearance = max(radius, self.config.food_wall_clearance)
+        if clearance * 2 >= self.config.width:
+            return None
+        floor = self.config.height - radius
+        intervals = [(clearance, self.config.width - clearance)]
+        obstacles = [(food.position[0], food.position[1], food.radius + self.config.food_spacing) for food in self.foods]
+        if self.exclusions is not None:
+            obstacles.extend((x, y, size + self.config.food_body_clearance) for x, y, size in self.exclusions())
+        for x, y, size in obstacles:
+            reach = size + radius
+            dy = abs(floor - y)
+            if dy > reach:
+                continue
+            half = sqrt(max(0.0, reach * reach - dy * dy))
+            left, right = x - half, x + half
+            remaining = []
+            for start, end in intervals:
+                if right <= start or left >= end:
+                    remaining.append((start, end))
+                else:
+                    if start < left:
+                        remaining.append((start, left))
+                    if right < end:
+                        remaining.append((right, end))
+            intervals = remaining
+        if not intervals:
+            return None
+        start, end = max(intervals, key=lambda span: (span[1] - span[0], -span[0]))
+        # Jitter within the largest free gap creates an even, reproducible spread.
+        return (start + (end - start) * self._random.uniform(0.35, 0.65), floor)
 
     def advance(self, dt: float) -> None:
         if not isfinite(dt) or dt < 0:

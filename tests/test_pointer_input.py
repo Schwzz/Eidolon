@@ -19,7 +19,7 @@ def click_node(app, size):
 
 @pytest.mark.parametrize("size", [(480, 320), (1280, 720), (1600, 900)])
 def test_pointer_uses_current_fit_camera_even_before_first_draw(size) -> None:
-    app = Application()
+    app = Application(AppConfig(mode="survival"))
     original = [asdict(node) for node in app.simulation.colony.nodes]
     camera, node, position = click_node(app, size)
     assert app.simulation.colony.grab.node == node.identifier
@@ -33,7 +33,7 @@ def test_pointer_uses_current_fit_camera_even_before_first_draw(size) -> None:
 
 
 def test_letterbox_hud_right_click_and_paused_click_do_not_grab() -> None:
-    app = Application()
+    app = Application(AppConfig(mode="survival"))
     for position in ((10, 10), (100, 300), (640, 690)):
         app._pointer_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=position), (1280, 720))
         assert app.simulation.colony.grab is None
@@ -52,7 +52,7 @@ def test_letterbox_hud_right_click_and_paused_click_do_not_grab() -> None:
     pygame.event.Event(pygame.WINDOWLEAVE),
 ])
 def test_resize_and_lost_focus_release_the_grab_without_regrabbing(monkeypatch, second_event) -> None:
-    app = Application(AppConfig(max_fps=0))
+    app = Application(AppConfig(mode="survival", max_fps=0))
     camera = ChamberRenderer.camera_for_window((1280, 720), (1200, 800))
     position = camera.world_to_screen(app.simulation.colony.nodes[0].position)
     events = iter([

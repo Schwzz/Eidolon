@@ -80,7 +80,7 @@ def test_growth_changes_world_radius_without_changing_camera_scale() -> None:
 
 def test_world_configuration_is_independent_of_window_configuration() -> None:
     from eidolon.app import Application
-    config = AppConfig(width=800, height=600, world=WorldConfig(width=1600, height=1000), life=LifeConfig())
+    config = AppConfig(mode="survival", width=800, height=600, world=WorldConfig(width=1600, height=1000), life=LifeConfig())
     app = Application(config)
     assert (app.simulation.world.config.width, app.simulation.world.config.height) == (1600, 1000)
     assert app.simulation.life.physical_radius == 24

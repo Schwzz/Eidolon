@@ -22,7 +22,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--brain", help="run a saved 30-input muscle brain in continuous survival simulation")
     parser.add_argument("--training-run", help="saved metrics JSON or run directory for the Training tab")
     parser.add_argument("--view", choices=("simulation", "neural", "training", "split"), default="simulation")
-    parser.add_argument("--controller", choices=("rules", "neural"), default=defaults.controller,
+    parser.add_argument("--mode", choices=("live", "survival"), help="default: Live Learning; brain/controller options select Survival")
+    parser.add_argument("--live-run", default=defaults.live_run, help="live checkpoint directory (default: runs/live)")
+    parser.add_argument("--controller", choices=("rules", "neural"), default=None,
                         help="decision controller (default: rules)")
     parser.add_argument("--network-seed", type=int, help="neural initialization seed (default: world seed)")
     parser.add_argument("--hidden-layers", type=int, nargs="+", metavar="WIDTH",
@@ -41,12 +43,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="render frame limit (default: 60; 0: uncapped)",
     )
     args = parser.parse_args(argv)
+    controller_name = args.controller or defaults.controller
+    if args.mode == "live" and (args.brain or args.muscle_test or args.controller is not None or args.body == "detailed"):
+        parser.error("Live Learning evaluates its ten-node neural population; use --mode survival for other controllers/bodies")
     if args.brain and (args.gravity is not None or args.floor_friction is not None):
         parser.error("muscle brains use the physics settings saved in the brain")
-    if args.brain and (args.controller != "rules" or args.muscle_test is not None
+    if args.brain and (controller_name != "rules" or args.muscle_test is not None
                       or any(value is not None for value in (args.network_seed, args.hidden_layers, args.load_network, args.save_network))):
         parser.error("--brain is separate from steering controllers and manual muscle-test options")
-    if args.controller != "neural" and any(option is not None for option in (
+    if controller_name != "neural" and any(option is not None for option in (
             args.network_seed, args.hidden_layers, args.load_network, args.save_network)):
         parser.error("network options require --controller neural")
     if args.load_network is not None and (args.network_seed is not None or args.hidden_layers is not None):
@@ -60,15 +65,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             brain_body = brain.episode.body
         config = AppConfig(width=args.width, height=args.height, max_fps=args.max_fps,
                            seed=args.seed if args.seed is not None else brain.episode.seed if brain is not None else defaults.seed,
-                           controller=args.controller,
+                           controller=controller_name,
                            muscle_test=args.muscle_test,
                            body=args.body or brain_body or defaults.body, show_nodes=args.show_nodes,
                            brain_path=args.brain, training_path=args.training_run, view=args.view,
+                           mode=args.mode or ("survival" if args.controller is not None or args.body is not None
+                                               or args.brain or args.muscle_test or args.training_run or args.gravity is not None
+                                               or args.floor_friction is not None or args.no_propulsion else "auto"),
+                           live_run=args.live_run,
                            physics=PhysicsConfig(gravity=defaults.physics.gravity if args.gravity is None else args.gravity,
                                                  floor_friction=defaults.physics.floor_friction if args.floor_friction is None else args.floor_friction,
                                                  propulsion_enabled=not (args.no_propulsion or args.muscle_test)))
         controller = None
-        if args.controller == "neural":
+        if controller_name == "neural":
             from eidolon.neural_controller import NeuralController
             from eidolon.neural_network import FeedForwardNetwork
 
@@ -84,7 +93,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as error:
         parser.error(str(error))
     except OSError as error:
-        parser.error(f"could not read/write network parameters: {error}")
+        parser.error(f"could not load/save application or training files: {error}")
     try:
         application.run()
     except KeyboardInterrupt:
@@ -92,6 +101,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (pygame.error, ValueError) as error:
         print(f"EIDOLON could not run: {error}", file=sys.stderr)
         return 1
+    finally:
+        application.close()
     return 0
 
 

@@ -21,6 +21,7 @@ class ChamberRenderer:
         self._title_font = pygame.font.Font(None, 32)
         self._title = self._title_font.render("EIDOLON", True, self.TEXT)
         self._label_font = pygame.font.Font(None, 20)
+        self._muscle_font = pygame.font.Font(None, 15)
         self._colony_renderer = ColonyRenderer()
         self._labels: dict[tuple[str, tuple[int, int, int]], pygame.Surface] = {}
         self.camera: Camera | None = None
@@ -49,7 +50,8 @@ class ChamberRenderer:
         surface.blit(
             self._label("SIMULATION CHAMBER", self.MUTED), (24, 50)
         )
-        mode = (f"MUSCLE {simulation.muscle_test.upper()}" if simulation is not None and simulation.muscle_test
+        live = simulation is not None and getattr(simulation, "is_live_learning", False)
+        mode = ("LIVE LEARNING" if live else f"MUSCLE {simulation.muscle_test.upper()}" if simulation is not None and simulation.muscle_test
                 else simulation.controller_name.upper() if simulation is not None else "")
         caption = "PHASE 2B.2" + (f" | {mode}" if mode else "")
         phase = self._label(caption, self.ACCENT)
@@ -79,20 +81,30 @@ class ChamberRenderer:
                 for x, y, _ in simulation.colony.sample(interpolation):
                     pygame.draw.circle(surface, self.ACCENT,
                                        tuple(round(v) for v in camera.world_to_screen((x, y))), 2, 1)
+            if live:
+                notice = self._label(simulation.notice, self.MUTED)
+                surface.blit(notice, (40, 100), (0, 0, width - 80, notice.get_height()))
             life = simulation.life
             energy = f"ENERGY {life.energy:.0f}/{life.max_energy:.0f}   AGE {life.age_seconds:.0f}s"
             replay = getattr(simulation, "is_replay", False)
             if replay:
                 metrics = simulation.environment.metrics()
                 energy = f"REWARD {metrics['reward']:+.3f}   MUSCLE E {metrics['muscle_energy']:.2f}"
+            if live:
+                metrics = simulation.environment.metrics()
+                energy = f"LIVE G{simulation.generation_number} A{simulation.active_attempt}  R {metrics['reward']:+.3f}"
             surface.blit(self._label(energy, self.MUTED), (40, height - 91))
             status = ("UNSTABLE" if not metrics["stable"] else "COMPLETE" if simulation.environment.done else "REPLAY") if replay else "ALIVE" if life.alive else "DEAD"
+            if live:
+                status = f"BEST {simulation.best_score:+.3f}" if simulation.best_score is not None else "BEST pending"
             status_label = self._label(status, self.ACCENT if life.alive and status != "UNSTABLE" else (184, 106, 118))
             surface.blit(status_label, (width - status_label.get_width() - 40, height - 91))
             growth = f"SIZE {life.body_scale:.2f}x   FOOD {len(simulation.world.foods)}"
             if replay:
                 growth = ("INTERACTIVE: NOT BENCHMARK" if simulation.intervened else
                           f"DX {simulation.muscle_displacement:+.2f}   TIME {simulation.elapsed_seconds:.1f}s")
+            if live:
+                growth = f"C{simulation.active_candidate + 1}/{simulation.trainer.config.population} S{simulation.active_seed} {simulation.status} | FOOD/STARVATION OFF"
             surface.blit(self._label(growth, self.MUTED), (40, height - 68))
             speed = f"{'PAUSED' if simulation.paused else 'RUNNING'} {simulation.speed:.2f}x"
             if replay and simulation.environment.done:
@@ -100,20 +112,26 @@ class ChamberRenderer:
             speed_label = self._label(speed, self.ACCENT)
             surface.blit(speed_label, (width - speed_label.get_width() - 40, height - 68))
             controls = "LMB Grab  SPACE Pause  R Reset  +/-"
-            if simulation.muscle_test is not None:
-                # A compact extra HUD line; the organism's renderer is unchanged.
-                y = height - 46
-                for region, activation in enumerate(simulation.colony.muscles.activations):
-                    x = 40 + region * 23
-                    pygame.draw.rect(surface, self.BORDER, (x, y, 20, 13))
-                    pygame.draw.rect(surface, self.ACCENT, (x, y, round(20 * activation), 13))
-                    surface.blit(self._label(str(region + 1), self.TEXT), (x + 6, y - 1))
-                motion = f"dx {simulation.muscle_displacement:+.1f}  E {life.muscle_energy_spent:.1f}"
-                surface.blit(self._label(motion, self.MUTED), (236, y))
-                if simulation.muscle_test == "manual" and width >= 800:
-                    controls += "  1-8 Muscles  0 Relax"
+            self._draw_muscles(surface, simulation, width, height)
+            if live:
+                controls = "SPACE Pause  S Stop/Continue  R Retry  N New Run"
+            elif simulation.muscle_test == "manual" and width >= 800:
+                controls += "  1-8 Muscles  0 Relax"
         else:
             controls = "EMPTY CHAMBER"
         surface.blit(self._label(controls, self.MUTED), (24, height - 29))
         hint = self._label("ESC  Exit", self.MUTED)
         surface.blit(hint, (width - hint.get_width() - 24, height - 29))
+
+    def _draw_muscles(self, surface, simulation, width, height):
+        edge = max(20, min(36, (width - 80) // 8))
+        for region, (activation, target) in enumerate(zip(simulation.colony.muscles.activations, simulation.colony.muscles.targets)):
+            motion = "+" if target > activation + 1e-4 else "-" if target < activation - 1e-4 else "="
+            color = self.ACCENT if motion != "-" else (176, 116, 180)
+            rect = pygame.Rect(40 + region * edge, height - 46, edge - 2, 14)
+            pygame.draw.rect(surface, self.BORDER, rect)
+            pygame.draw.rect(surface, color, (rect.x, rect.y, round(rect.width * activation), rect.height))
+            label = self._muscle_font.render(f"{region + 1}{motion}{activation * 100:02.0f}", True, self.TEXT)
+            surface.blit(label, (rect.x + 1, rect.y + 1))
+        if width >= 600:
+            surface.blit(self._muscle_font.render("actual %  +contract -relax", True, self.MUTED), (48 + edge * 8, height - 44))

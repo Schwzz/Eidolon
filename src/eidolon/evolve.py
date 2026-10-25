@@ -10,6 +10,7 @@ from eidolon.evolution import EvolutionConfig, EvolutionTrainer, evaluate_policy
 from eidolon.muscle_controller import NeuralMuscleController
 from eidolon.train import evaluate
 from eidolon.training import EpisodeConfig, LocomotionEnvironment
+from eidolon.run_store import RunLock, save_snapshot
 
 
 def compare(controller, seeds, baseline=None):
@@ -72,24 +73,29 @@ def main(argv=None):
             return 0
         if not 1 <= args.generations <= 10000:
             raise ValueError("generations must be 1–10000")
-        if args.command == "train":
-            directory = Path(args.output)
-            if any((directory / name).exists() for name in ("checkpoint.json", "best.json", "metrics.json", "initial-best.json")):
-                raise ValueError("output already contains training artifacts; use resume or a new directory")
-            trainer = EvolutionTrainer(EvolutionConfig(seed=args.seed, population=args.population, elites=args.elites,
-                seeds=tuple(args.seeds), hidden_layers=tuple(args.hidden_layers), mutation_std=args.mutation_std,
-                mutation_rate=args.mutation_rate, episode=EpisodeConfig(body=args.body, duration=args.duration,
-                                                                        target_distance=args.target_distance)))
-        else:
-            trainer = EvolutionTrainer.load(args.checkpoint)
-            directory = Path(args.output) if args.output else Path(args.checkpoint).parent
-            if (directory.resolve() != Path(args.checkpoint).parent.resolve()
-                    and any((directory / name).exists() for name in ("checkpoint.json", "best.json", "metrics.json"))):
-                raise ValueError("resume output contains another run; choose a new directory")
-        for _ in range(args.generations):
-            row = trainer.generation()
-            trainer.save(directory)
-            print(json.dumps({key: row[key] for key in row if key != "candidates"}, allow_nan=False), flush=True)
+        directory = Path(args.output) if args.output else Path(args.checkpoint).parent
+        with RunLock(directory):
+            if args.command == "train":
+                if any((directory / name).exists() for name in ("live.json", "checkpoint.json", "best.json", "metrics.json", "initial-best.json")):
+                    raise ValueError("output already contains training artifacts; use resume or a new directory")
+                trainer = EvolutionTrainer(EvolutionConfig(seed=args.seed, population=args.population, elites=args.elites,
+                    seeds=tuple(args.seeds), hidden_layers=tuple(args.hidden_layers), mutation_std=args.mutation_std,
+                    mutation_rate=args.mutation_rate, episode=EpisodeConfig(body=args.body, duration=args.duration,
+                                                                            target_distance=args.target_distance)))
+            else:
+                trainer = EvolutionTrainer.load(args.checkpoint)
+                if (directory.resolve() != Path(args.checkpoint).parent.resolve()
+                        and any((directory / name).exists() for name in ("live.json", "checkpoint.json", "best.json", "metrics.json"))):
+                    raise ValueError("resume output contains another run; choose a new directory")
+            for _ in range(args.generations):
+                row = trainer.generation()
+                if (directory / "live.json").exists():
+                    # Keep the authoritative GUI snapshot ahead of derived artifacts too.
+                    save_snapshot(directory, dict(format="eidolon.live-learning", version=1,
+                        trainer=trainer.checkpoint_data(), candidates=[], seed_reports=[], paused=False, stopped=False))
+                else:
+                    trainer.save(directory)
+                print(json.dumps({key: row[key] for key in row if key != "candidates"}, allow_nan=False), flush=True)
         return 0
     except (ValueError, OSError) as error:
         parser.error(str(error))

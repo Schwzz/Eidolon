@@ -15,6 +15,15 @@ def neural_activity(simulation):
     network = getattr(controller, "network", None)
     if network is None or getattr(simulation, "muscle_test", None) is not None:
         return None, None, "No neural controller active"
+    if getattr(simulation, "is_live_learning", False):
+        if simulation.stopped:
+            return network, getattr(network, "last_activations", None), "Learning stopped: last actual decision"
+        if simulation.paused:
+            return network, getattr(network, "last_activations", None), "Learning paused: last actual decision"
+        if simulation.environment.settling:
+            return network, None, "Settling body; no neural inference yet"
+        if simulation._transition:
+            return network, None, "Attempt finished; next candidate/seed starts automatically"
     if getattr(simulation, "is_replay", False) and simulation.environment.done:
         status = "Episode completed" if simulation.environment.metrics()["stable"] else "Episode stopped: unstable"
         return network, None, status + "; inference stopped"
@@ -38,8 +47,20 @@ class LaboratoryRenderer:
     @staticmethod
     def tab_rects(size):
         width = size[0]
-        edge = min(148, (width - 48) // 4)
+        reserve = 280 if width >= 700 else 172
+        edge = min(148, (width - 48 - reserve) // 4)
         return [pygame.Rect(24 + index * edge, 49, edge - 4, 26) for index in range(4)]
+
+    @staticmethod
+    def mode_rects(size):
+        edge = 140 if size[0] >= 700 else 86
+        return [pygame.Rect(size[0] - 24 - edge * (2 - index), 49, edge - 4, 26) for index in range(2)]
+
+    def mode_at(self, position, size):
+        for mode, rect in zip(("live", "survival"), self.mode_rects(size)):
+            if rect.collidepoint(position):
+                return mode
+        return None
 
     def select_at(self, position, size):
         for view, rect in zip(VIEWS, self.tab_rects(size)):
@@ -65,22 +86,34 @@ class LaboratoryRenderer:
             if self.view == "neural":
                 self._neural(surface, rect, simulation)
             else:
-                self._training(surface, rect)
+                self._training(surface, rect, simulation)
             pygame.draw.rect(surface, ChamberRenderer.BACKGROUND, (24, height - 36, width - 130, 29))
             status = ("EPISODE COMPLETE | R Reset" if getattr(simulation, "is_replay", False) and simulation.environment.done
                       else "SIMULATION PAUSED" if simulation.paused else "SIMULATION CONTINUES")
+            if getattr(simulation, "is_live_learning", False):
+                status = f"LIVE {simulation.status} | SPACE Pause  S Stop  R Retry  N New Run"
             self._text(surface, status + " | F1-F4 Tabs", (24, height - 29), ChamberRenderer.MUTED, small=True)
         pygame.draw.rect(surface, ChamberRenderer.BACKGROUND, (24, 48, width - 48, 29))
         labels = ("Simulation", "Neural Network", "Training", "Split View") if width >= 700 else ("Sim", "Neural", "Training", "Split")
         for view, label, rect in zip(VIEWS, labels, self.tab_rects(surface.get_size())):
             pygame.draw.rect(surface, (32, 58, 63) if view == self.view else (20, 30, 37), rect, border_radius=4)
             self._text(surface, label, (rect.x + 10, rect.y + 5), ChamberRenderer.ACCENT if view == self.view else ChamberRenderer.MUTED)
+        live = getattr(simulation, "is_live_learning", False)
+        for index, rect in enumerate(self.mode_rects(surface.get_size())):
+            selected = (index == 0) == live
+            pygame.draw.rect(surface, (32, 58, 63) if selected else (20, 30, 37), rect, border_radius=4)
+            label = ("Live Learning" if width >= 700 else "Live") if index == 0 else "Survival"
+            self._text(surface, label, (rect.x + 8, rect.y + 5), ChamberRenderer.ACCENT if selected else ChamberRenderer.MUTED)
+        if getattr(self, "mode_error", None):
+            self._text(surface, self.mode_error[:110], (32, 78), (220, 120, 130), small=True)
 
     def _neural(self, surface, rect, simulation):
         old_clip = surface.get_clip()
         surface.set_clip(rect.clip(old_clip))
         try:
             network, trace, status = neural_activity(simulation)
+            if getattr(simulation, "is_live_learning", False):
+                status = f"G{simulation.generation_number} C{simulation.active_candidate + 1} S{simulation.active_seed} | {status}"
             self._text(surface, "NEURAL NETWORK", (rect.x + 8, rect.y + 5), ChamberRenderer.ACCENT)
             self._text(surface, status, (rect.x + 8, rect.y + 28), ChamberRenderer.MUTED, small=True)
             if network is None:
@@ -90,7 +123,7 @@ class LaboratoryRenderer:
                 from eidolon.training import OBSERVATION_NAMES
                 input_names = OBSERVATION_NAMES
                 output_names = tuple(f"M{i + 1}" for i in range(8))
-                note = "Outputs: tanh -> (value+1)/2 muscle actions"
+                note = "Neurons calculate eight muscle activations (0-1)"
             else:
                 from eidolon.neural_controller import INPUT_NAMES
                 input_names, output_names = INPUT_NAMES, ("Steering", "Effort")
@@ -98,6 +131,7 @@ class LaboratoryRenderer:
             key = (id(network), tuple(rect), network.layers)
             if self._graph_key != key:
                 self._graph_key = key
+                self._graph_network = network  # Keep identity alive until cache replacement.
                 graph = pygame.Surface(rect.size)
                 graph.fill(ChamberRenderer.CHAMBER)
                 left, right = min(170, rect.width * 0.32), rect.width - 68
@@ -145,22 +179,39 @@ class LaboratoryRenderer:
         finally:
             surface.set_clip(old_clip)
 
-    def _training(self, surface, rect):
+    def _training(self, surface, rect, simulation=None):
         old_clip = surface.get_clip()
         surface.set_clip(rect.clip(old_clip))
         try:
-            self._text(surface, "TRAINING — SAVED SNAPSHOT", (rect.x + 8, rect.y + 6), ChamberRenderer.ACCENT)
-            self._text(surface, "No live training runs in this window. Reload with F5.", (rect.x + 8, rect.y + 32), small=True)
-            if getattr(self, "metrics_error", None):
+            live = simulation if getattr(simulation, "is_live_learning", False) else getattr(self, "live_session", None)
+            self._text(surface, "TRAINING — LIVE LEARNING" if live else "TRAINING — SAVED SNAPSHOT", (rect.x + 8, rect.y + 6), ChamberRenderer.ACCENT)
+            if live:
+                state = live.status if simulation is live else "INACTIVE (Survival mode)"
+                best = f"{live.best_score:+.4f}" if live.best_score is not None else "pending full generation"
+                self._text(surface, f"{state} | Current {live.environment.metrics()['reward']:+.4f} | Best {best}", (rect.x + 8, rect.y + 32), small=True)
+                self._text(surface, "SPACE Pause/resume   S Stop/continue   R Retry attempt   N New run (archives progress)", (rect.x + 8, rect.y + 54), small=True)
+                self._text(surface, live.notice, (rect.x + 8, rect.y + 76), small=True)
+                completed = len(live.candidates) * len(live.trainer.config.seeds) + len(live.seed_reports)
+                total = live.trainer.config.population * len(live.trainer.config.seeds)
+                save = "SAVE FAILED" if live.save_error else "Saving" if live.writer.busy else "Saved"
+                self._text(surface, f"G{live.generation_number}  C{live.active_candidate + 1}/{live.trainer.config.population}  Seed {live.active_seed} | {completed}/{total} attempts | {save}", (rect.x + 8, rect.y + 98), small=True)
+                if live.save_error:
+                    self._text(surface, live.save_error[:120], (rect.x + 8, rect.bottom - 15), (210, 110, 120), small=True)
+            else:
+                self._text(surface, "No live training runs in this window. Reload with F5.", (rect.x + 8, rect.y + 32), small=True)
+            if not live and getattr(self, "metrics_error", None):
                 self._text(surface, "Reload failed: " + self.metrics_error[:100], (rect.x + 8, rect.bottom - 12), (210, 110, 120), small=True)
-            data = self.metrics
+            data = (dict(history=live.trainer.history, config=dict(population=live.trainer.config.population, seeds=live.trainer.config.seeds))
+                    if live else self.metrics)
             if data is None or not data["history"]:
-                self._text(surface, "Open --training-run runs/example/metrics.json", (rect.x + 8, rect.y + 70), small=True)
+                text = "No completed generations yet: every candidate must finish all seeds." if live else "Open --training-run runs/example/metrics.json"
+                self._text(surface, text, (rect.x + 8, rect.y + (146 if live else 70)), small=True)
                 return
             history, config = data["history"], data["config"]
-            self._text(surface, f"{len(history)} completed generations | population {config['population']} | seeds {config['seeds']}",
-                       (rect.x + 8, rect.y + 60), small=True)
-            chart = pygame.Rect(rect.x + 40, rect.y + 105, max(30, rect.width - 70), max(40, rect.height * 0.45))
+            if not live:
+                self._text(surface, f"{len(history)} completed generations | population {config['population']} | seeds {config['seeds']}",
+                           (rect.x + 8, rect.y + 60), small=True)
+            chart = pygame.Rect(rect.x + 40, rect.y + (146 if live else 105), max(30, rect.width - 70), max(40, rect.height * (0.37 if live else 0.45)))
             pygame.draw.rect(surface, (20, 30, 37), chart)
             values = [row[key] for row in history for key in ("best", "mean")]
             low, high = min(values), max(values)

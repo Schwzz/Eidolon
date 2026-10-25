@@ -6,7 +6,7 @@ from eidolon.world import Food, World
 
 
 def test_resources_are_seeded_capped_and_consumed_once() -> None:
-    settings = WorldConfig(width=100, height=80, initial_food=3, food_capacity=3)
+    settings = WorldConfig(width=100, height=80, initial_food=3, food_capacity=3, food_wall_clearance=10)
     first, second = World(settings, 17, 15), World(settings, 17, 15)
     assert first.foods == second.foods
     assert first.foods != World(settings, 18, 15).foods
@@ -20,7 +20,7 @@ def test_resources_are_seeded_capped_and_consumed_once() -> None:
 
 
 def test_regeneration_uses_simulation_time_and_never_banks_full_world_spawns() -> None:
-    settings = WorldConfig(width=100, height=80, initial_food=0, food_capacity=3, regeneration_interval=0.5)
+    settings = WorldConfig(width=100, height=80, initial_food=0, food_capacity=3, regeneration_interval=0.5, food_wall_clearance=10)
     world = World(settings, 17, 15)
     world.advance(1.2)
     assert len(world.foods) == 2
@@ -51,8 +51,8 @@ def test_spawn_locations_are_reachable_even_at_maximum_growth() -> None:
     assert simulation.world.spawn_margin >= required + simulation.world_config.food_radius
     for food in simulation.world.foods:
         x, y = food.position
-        assert required <= x <= simulation.world_config.width - required
-        assert required <= y <= simulation.world_config.height - required
+        assert simulation.world_config.food_wall_clearance <= x <= simulation.world_config.width - simulation.world_config.food_wall_clearance
+        assert y == simulation.world_config.height - food.radius
 
 
 def test_nearest_food_has_a_range_limit_and_stable_tie_breaking() -> None:

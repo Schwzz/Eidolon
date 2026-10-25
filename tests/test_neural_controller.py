@@ -75,7 +75,7 @@ def test_network_outputs_request_steering_and_effort_without_touching_physics() 
 
 
 def test_rules_default_and_neural_application_selection_keep_identical_initial_worlds() -> None:
-    rules = Application(AppConfig(seed=42))
+    rules = Application(AppConfig(mode="survival", seed=42))
     neural = Application(AppConfig(seed=42, controller="neural"))
     assert isinstance(rules.simulation.controller, SurvivalRules)
     assert isinstance(neural.simulation.controller, NeuralController)

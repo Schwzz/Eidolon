@@ -100,7 +100,7 @@ def test_tabs_draw_resize_without_changing_physics_or_running_inference(size, vi
 
 
 def test_click_tabs_and_split_pointer_use_correct_viewport():
-    app = Application(AppConfig(body="simple"))
+    app = Application(AppConfig(mode="survival", body="simple"))
     app.simulation.update(1 / 60)
     before = app.simulation.steps, app.simulation.elapsed_seconds, app.simulation.paused
     for view in ("neural", "training", "split", "simulation"):
@@ -117,7 +117,7 @@ def test_click_tabs_and_split_pointer_use_correct_viewport():
 
 
 def test_window_hotkeys_switch_views_without_pausing_or_resetting(monkeypatch):
-    app = Application(AppConfig(max_fps=0))
+    app = Application(AppConfig(mode="survival", max_fps=0))
     keys = [pygame.K_F2, pygame.K_F3, pygame.K_F4, pygame.K_F1]
     events = iter([[pygame.event.Event(pygame.KEYDOWN, key=key)] for key in keys] + [[pygame.event.Event(pygame.QUIT)]])
     times = iter(i / 60 for i in range(5))

@@ -109,9 +109,10 @@ class LocomotionEnvironment:
     ACTION_COUNT = 8
     OBSERVATION_NAMES = OBSERVATION_NAMES
 
-    def __init__(self, config: EpisodeConfig | None = None, *, allow_grab: bool = False) -> None:
+    def __init__(self, config: EpisodeConfig | None = None, *, allow_grab: bool = False, defer_settle: bool = False) -> None:
         self.config = config if config is not None else EpisodeConfig()
         self.allow_grab = allow_grab
+        self.defer_settle = defer_settle
         self.seed = self.config.seed
         self.reset()
 
@@ -128,8 +129,16 @@ class LocomotionEnvironment:
         self.colony.translate_to((settings.world_size[0] / 2,
                                   self.colony.center[1] + settings.world_size[1] - bottom - 2))
         self._identity = tuple((n.identifier, n.mass) for n in self.colony.nodes)
-        for _ in range(round(settings.settle_seconds / settings.timestep)):
-            self.colony.advance(settings.timestep, (0.0, 0.0), settings.world_size, active=False)
+        self._settle_remaining = round(settings.settle_seconds / settings.timestep)
+        if not self.defer_settle:
+            for _ in range(self._settle_remaining):
+                self.colony.advance(settings.timestep, (0.0, 0.0), settings.world_size, active=False)
+            self._settle_remaining = 0
+        self._initialize_measurements()
+        return self._observation
+
+    def _initialize_measurements(self):
+        settings = self.config
         self.colony.begin_step()
         self._start_x = self.colony.material_center[0]
         self._initial_extent = self._extent()
@@ -144,7 +153,18 @@ class LocomotionEnvironment:
         self._peak_components = len(self.colony.components)
         self._last_positions = tuple(n.position for n in self.colony.nodes)
         self._observation = self.observe()
-        return self._observation
+
+    @property
+    def settling(self):
+        return self._settle_remaining > 0
+
+    def settle_tick(self):
+        if not self.settling:
+            return
+        self.colony.advance(self.config.timestep, (0.0, 0.0), self.config.world_size, active=False)
+        self._settle_remaining -= 1
+        if not self.settling:
+            self._initialize_measurements()
 
     @property
     def elapsed_seconds(self) -> float:
@@ -204,6 +224,8 @@ class LocomotionEnvironment:
         """
         if self.done:
             raise RuntimeError("episode is finished; call reset before stepping again")
+        if self.settling:
+            raise RuntimeError("finish passive settling before evaluating actions")
         # Validation happens before time, physics, rewards, or RNG state changes.
         if ticks is not None and (type(ticks) is not int or not 1 <= ticks <= self._action_ticks):
             raise ValueError("ticks must be between 1 and the action interval's tick count")

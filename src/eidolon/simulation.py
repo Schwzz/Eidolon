@@ -77,7 +77,6 @@ class Simulation:
         """Recreate the whole seeded world, preserving pause and speed controls."""
         settings = self.life_config
         margin = settings.base_radius * settings.max_scale * SPRITE_EXTENT + self.world_config.food_radius
-        self.world = World(self.world_config, self.seed, margin, self.physics_config)
         self.life = LifeState(
             (self.world_config.width / 2, self.world_config.height / 2),
             (self.seed % 65536) * 0.61803398875 % tau,
@@ -89,6 +88,9 @@ class Simulation:
         self.colony.translate_to((self.world_config.width / 2,
                                   self.colony.center[1] + self.world_config.height - bottom - 2.0))
         self.life.position = self.colony.center
+        self.world = World(self.world_config, self.seed, margin, self.physics_config,
+                           exclusions=lambda: ((n.position[0], n.position[1], n.radius * MEMBRANE_RADIUS)
+                                               for n in self.colony.nodes))
         self._initial_material_x = self.colony.material_center[0]
         if self.muscle_controller is not None:
             self.muscle_controller.clear_activity()

@@ -133,12 +133,18 @@ class EvolutionTrainer:
         self.best = self.initial_best = None
 
     def generation(self):
-        if len(self.history) >= 10000:
-            raise ValueError("generation history limit reached")
         candidates = []
         for index, network in enumerate(self.population):
             result = evaluate_policy(NeuralMuscleController(network), self.config.episode, self.config.seeds)
             candidates.append(dict(index=index, **{key: result[key] for key in ("score", "distance", "energy", "stable", "success")}))
+        return self.finish_generation(candidates)
+
+    def finish_generation(self, candidates):
+        """Use the same selection/mutation for headless and incremental evaluations."""
+        if len(self.history) >= 10000:
+            raise ValueError("generation history limit reached")
+        if len(candidates) != self.config.population or [c["index"] for c in candidates] != list(range(self.config.population)):
+            raise ValueError("a generation needs every candidate in population order")
         scores = [candidate["score"] for candidate in candidates]
         elite_indices = select_elites(scores, self.config.elites)
         self.best = self.population[elite_indices[0]]
@@ -148,20 +154,23 @@ class EvolutionTrainer:
         row = dict(generation=len(self.history) + 1, best=max(scores), mean=fmean(scores), median=median(scores),
                    worst=min(scores), distance=champion["distance"], energy=champion["energy"],
                    stable=champion["stable"], candidates=candidates)
-        self.history.append(row)
+        self.history = [*self.history, row]  # Completed rows remain immutable for snapshot writers.
         elites = [self.population[index] for index in elite_indices]
         self.population = elites + [mutate(elites[int(self.rng.integers(len(elites)))], self.rng,
                                            self.config.mutation_std, self.config.mutation_rate)
                                     for _ in range(self.config.population - len(elites))]
         return row
 
-    def save(self, directory):
-        directory = Path(directory)
-        write_json(directory / "checkpoint.json", dict(format="eidolon.evolution-checkpoint", version=1,
-            config=asdict(self.config), history=self.history, rng=self.rng.bit_generator.state,
+    def checkpoint_data(self):
+        return dict(format="eidolon.evolution-checkpoint", version=1,
+            config=asdict(self.config), history=list(self.history), rng=self.rng.bit_generator.state,
             population=[network.to_parameters() for network in self.population],
             best=self.best.to_parameters() if self.best is not None else None,
-            initial_best=self.initial_best.to_parameters() if self.initial_best is not None else None))
+            initial_best=self.initial_best.to_parameters() if self.initial_best is not None else None)
+
+    def save(self, directory):
+        directory = Path(directory)
+        write_json(directory / "checkpoint.json", self.checkpoint_data())
         if self.best is not None:
             NeuralMuscleController(self.best, self.config.episode, self.config.seeds).save(directory / "best.json")
             NeuralMuscleController(self.initial_best, self.config.episode, self.config.seeds).save(directory / "initial-best.json")
@@ -170,7 +179,10 @@ class EvolutionTrainer:
 
     @classmethod
     def load(cls, path):
-        data = read_json(path)
+        return cls.from_checkpoint_data(read_json(path))
+
+    @classmethod
+    def from_checkpoint_data(cls, data):
         fields = {"format", "version", "config", "history", "rng", "population", "best", "initial_best"}
         if (not isinstance(data, dict) or set(data) != fields or data["format"] != "eidolon.evolution-checkpoint"
                 or type(data["version"]) is not int or data["version"] != 1):

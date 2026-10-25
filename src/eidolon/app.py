@@ -5,6 +5,7 @@ from pathlib import Path
 from dataclasses import replace
 
 import pygame
+import sys
 
 from eidolon.config import AppConfig, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH
 from eidolon.behavior import Controller
@@ -20,27 +21,77 @@ class Application:
         self.view = self.config.view
         self.laboratory = None
         self.saved_metrics = None
+        self._learning = self._survival = None
+        self._brain = brain
         if self.config.training_path:
             from eidolon.evolution import load_metrics
             path = Path(self.config.training_path)
             self.metrics_path = path / "metrics.json" if path.is_dir() else path
             self.saved_metrics = load_metrics(self.metrics_path)
+        normal_requested = (self.config.brain_path is not None or controller is not None
+                            or self.config.controller != "rules" or self.config.muscle_test is not None
+                            or self.config.training_path is not None)
+        self.mode = "survival" if self.config.mode == "survival" or (self.config.mode == "auto" and normal_requested) else "live"
+        self._steering_controller = controller
+        self._switch_mode(self.mode)
+
+    def _make_survival(self):
         if self.config.brain_path:
             from eidolon.muscle_controller import NeuralMuscleController
-            brain = brain if brain is not None else NeuralMuscleController.load(self.config.brain_path)
+            brain = self._brain if self._brain is not None else NeuralMuscleController.load(self.config.brain_path)
             settings = brain.episode
-            self.simulation = Simulation(self.config.seed,
+            return Simulation(self.config.seed,
                 replace(self.config.world, width=settings.world_size[0], height=settings.world_size[1]),
                 replace(self.config.life, base_radius=settings.base_radius),
                 physics_config=settings.physics, muscle_config=settings.muscles,
                 body=self.config.body, muscle_controller=brain)
-            return
+        controller = self._steering_controller
         if controller is None and self.config.controller == "neural":
             from eidolon.neural_controller import NeuralController
 
             controller = NeuralController.from_seed(self.config.seed)
-        self.simulation = Simulation(self.config.seed, self.config.world, self.config.life, controller,
-                                     self.config.physics, self.config.muscles, self.config.muscle_test, self.config.body)
+        return Simulation(self.config.seed, self.config.world, self.config.life, controller,
+                          self.config.physics, self.config.muscles, self.config.muscle_test, self.config.body)
+
+    def _switch_mode(self, mode):
+        if hasattr(self, "simulation"):
+            self.simulation.release_grab()
+        if mode == "live":
+            if self._learning is None:
+                from eidolon.live_learning import LiveLearning
+                from eidolon.evolution import EvolutionConfig
+                from eidolon.training import EpisodeConfig
+                config = EvolutionConfig(seed=self.config.seed, population=6, elites=2,
+                    seeds=(self.config.seed, self.config.seed + 1),
+                    episode=EpisodeConfig(seed=self.config.seed, duration=6, target_distance=20))
+                self._learning = LiveLearning(self.config.live_run, config, budget_ms=self.config.live_budget_ms)
+            self.simulation = self._learning
+        else:
+            if self._survival is None:
+                self._survival = self._make_survival()
+            self.simulation = self._survival
+        self.mode = mode
+
+    def close(self):
+        if self._learning is not None:
+            try:
+                self._learning.close()
+            except (OSError, ValueError) as error:
+                print(f"Live learning save failed: {error}", file=sys.stderr)
+
+    def _mode_command(self, mode):
+        try:
+            self._switch_mode(mode)
+            self.laboratory.mode_error = None
+        except (OSError, ValueError) as error:
+            self.laboratory.mode_error = str(error)
+
+    def _learning_command(self, command):
+        try:
+            command()
+        except (OSError, ValueError) as error:
+            self.simulation.save_error = str(error)
+            self.simulation.stopped = True
 
     def _muscle_key(self, event) -> None:
         if self.simulation.muscle_test != "manual":
@@ -110,6 +161,12 @@ class Application:
                                 self.laboratory.metrics_error = None
                             except (OSError, ValueError) as error:
                                 self.laboratory.metrics_error = str(error)
+                        elif event.key == pygame.K_l:
+                            self._mode_command("survival" if self.mode == "live" else "live")
+                        elif event.key == pygame.K_s and self.mode == "live":
+                            self._learning_command(self.simulation.toggle_stopped)
+                        elif event.key == pygame.K_n and self.mode == "live":
+                            self._learning_command(self.simulation.restart_learning)
                         if event.key == pygame.K_ESCAPE:
                             running = False
                         elif event.key == pygame.K_SPACE:
@@ -137,7 +194,11 @@ class Application:
                             pygame.RESIZABLE,
                         )
                     elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION):
-                        if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                        mode = (self.laboratory.mode_at(event.pos, surface.get_size())
+                                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 else None)
+                        if mode:
+                            self._mode_command(mode)
+                        elif (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
                                 and self.laboratory.select_at(event.pos, surface.get_size())):
                             self._switch_view(self.laboratory.view)
                         else:
@@ -149,12 +210,20 @@ class Application:
                     break
 
                 now = perf_counter()
-                simulation_clock.advance(now - previous_time, self.simulation.update)
+                if self.mode == "live":
+                    self.simulation.update(min(self.config.max_frame_seconds, now - previous_time))
+                else:
+                    if self._learning is not None:
+                        self._learning.poll_save()
+                    simulation_clock.advance(now - previous_time, self.simulation.update)
                 previous_time = now
-                self.laboratory.draw(surface, self.simulation, simulation_clock.interpolation_alpha)
+                self.laboratory.live_session = self._learning
+                alpha = 1.0 if self.mode == "live" else simulation_clock.interpolation_alpha
+                self.laboratory.draw(surface, self.simulation, alpha)
                 pygame.display.flip()
                 frame_limiter.tick(self.config.max_fps)
         finally:
             self.simulation.release_grab()
             self.simulation.relax_muscles()
+            self.close()
             pygame.quit()
