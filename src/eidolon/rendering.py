@@ -15,7 +15,8 @@ class ChamberRenderer:
     MUTED = (124, 148, 155)
     ACCENT = (100, 193, 178)
 
-    def __init__(self) -> None:
+    def __init__(self, *, show_nodes: bool = False) -> None:
+        self.show_nodes = show_nodes
         # Pygame's bundled font avoids external assets and platform font paths.
         self._title_font = pygame.font.Font(None, 32)
         self._title = self._title_font.render("EIDOLON", True, self.TEXT)
@@ -50,7 +51,7 @@ class ChamberRenderer:
         )
         mode = (f"MUSCLE {simulation.muscle_test.upper()}" if simulation is not None and simulation.muscle_test
                 else simulation.controller_name.upper() if simulation is not None else "")
-        caption = "PHASE 2A.2" + (f" | {mode}" if mode else "")
+        caption = "PHASE 2B.1" + (f" | {mode}" if mode else "")
         phase = self._label(caption, self.ACCENT)
         surface.blit(phase, (width - phase.get_width() - 24, 29))
 
@@ -74,6 +75,10 @@ class ChamberRenderer:
                 surface, world_rect, simulation.colony, camera,
                 simulation.organism.appearance, interpolation, simulation.organism.age_seconds,
             )
+            if self.show_nodes:
+                for x, y, _ in simulation.colony.sample(interpolation):
+                    pygame.draw.circle(surface, self.ACCENT,
+                                       tuple(round(v) for v in camera.world_to_screen((x, y))), 2, 1)
             life = simulation.life
             energy = f"ENERGY {life.energy:.0f}/{life.max_energy:.0f}   AGE {life.age_seconds:.0f}s"
             surface.blit(self._label(energy, self.MUTED), (40, height - 91))

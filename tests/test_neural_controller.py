@@ -112,7 +112,7 @@ def test_inference_runs_once_per_simulation_substep_and_never_while_paused_dead_
         before = snapshot(simulation)
         renderer.draw(pygame.Surface(size), simulation)
         assert snapshot(simulation) == before
-    assert ("PHASE 2A.2 | NEURAL", renderer.ACCENT) in renderer._labels
+    assert ("PHASE 2B.1 | NEURAL", renderer.ACCENT) in renderer._labels
     assert len(calls) == 4
     simulation.paused = False
     simulation.life.energy = 0

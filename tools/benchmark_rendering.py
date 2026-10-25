@@ -15,6 +15,7 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--seed", type=int, default=17)
+    parser.add_argument("--body", choices=("simple", "detailed"), default="detailed")
     parser.add_argument("--controller", choices=("rules", "neural"), default="rules")
     parser.add_argument("--network-seed", type=int, help="initialization seed for neural comparisons")
     parser.add_argument("--gravity", type=float, default=180.0)
@@ -42,6 +43,7 @@ def main() -> None:
 
     try:
         config = AppConfig(width=args.width, height=args.height, seed=args.seed, controller=args.controller,
+                           body=args.body,
                            muscle_test=args.muscle_test,
                            physics=PhysicsConfig(gravity=args.gravity, floor_friction=args.floor_friction,
                                                  propulsion_enabled=not (args.no_propulsion or args.muscle_test)))
@@ -63,7 +65,7 @@ def main() -> None:
 
             controller = NeuralController.from_seed(config.seed if args.network_seed is None else args.network_seed)
         simulation = Simulation(config.seed, config.world, config.life, controller, config.physics,
-                                config.muscles, config.muscle_test)
+                                config.muscles, config.muscle_test, config.body)
         simulation.life.body_scale = args.scale
         simulation.colony.set_growth(args.scale, (config.world.width, config.world.height))
         simulation.life.position = simulation.colony.center
@@ -104,6 +106,7 @@ def main() -> None:
             "video_driver": pygame.display.get_driver(),
             "resolution": list(surface.get_size()),
             "seed": config.seed,
+            "body": config.body,
             "controller": simulation.controller_name,
             "gravity": config.physics.gravity,
             "propulsion_enabled": config.physics.propulsion_enabled,

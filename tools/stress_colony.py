@@ -12,13 +12,14 @@ from eidolon.muscles import wave_activations
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, default=17)
+    parser.add_argument("--body", choices=("simple", "detailed"), default="detailed")
     parser.add_argument("--cycles", type=int, default=6)
     parser.add_argument("--scale", type=float, default=1.0)
     parser.add_argument("--muscles", action="store_true", help="Exercise muscles alongside compatibility fragment recovery")
     args = parser.parse_args()
     if args.cycles <= 0 or not isfinite(args.scale) or not 1 <= args.scale <= 1.6:
         parser.error("--cycles must be positive and --scale must be between 1 and 1.6")
-    colony = Colony(args.seed, (600, 755), 24)
+    colony = Colony(args.seed, (600, 755), 24, body=args.body)
     colony.set_growth(args.scale, (1200, 800))
     identities = tuple(id(node) for node in colony.nodes)
     initial_bonds = len(colony.bonds)
@@ -29,13 +30,20 @@ def main() -> None:
         axis = cycle % 2
         direction = 1 if colony.center[axis] < (600, 400)[axis] else -1
         node = max(colony.nodes, key=lambda item: item.position[axis] * direction)
+        if args.body == "simple":
+            # Pull a lightly connected edge tip; a ten-node body can otherwise
+            # follow the pointer as a whole before a fragment is torn away.
+            edge = node.position[axis] * direction
+            tips = [item for item in colony.nodes
+                    if item.position[axis] * direction > edge - colony.spacing * colony.scale]
+            node = min(tips, key=lambda item: (len(item.connections), -item.position[axis] * direction, item.identifier))
         origin = node.position
         colony.begin_grab(origin)
         # 2.5 seconds pulling, then 18 seconds with normal locomotion/recovery.
         for frame in range(2460):
             if frame < 300:
                 target = list(origin)
-                target[axis] += direction * (frame + 1) / 120 * 160
+                target[axis] += direction * (frame + 1) / 120 * (480 if args.body == "simple" else 160)
                 colony.move_grab(tuple(target))
             elif frame == 300:
                 colony.release_grab()
@@ -62,7 +70,7 @@ def main() -> None:
         assert sum(node.mass for node in colony.nodes) == initial_mass
         recovered += 1
     assert peak_components > 1 and colony.broken_bonds > 0 and colony.reconnected_bonds > 0
-    print(json.dumps(dict(seed=args.seed, scale=args.scale, nodes=len(colony.nodes),
+    print(json.dumps(dict(seed=args.seed, body=args.body, scale=args.scale, nodes=len(colony.nodes),
                           muscles=args.muscles,
                           bonds=len(colony.bonds), simulation_seconds=steps / 120,
                           cycles_recovered=recovered, peak_components=peak_components,

@@ -5,7 +5,7 @@ from math import atan2, ceil, cos, hypot, isfinite, pi, sin, tau
 
 from eidolon.behavior import Controller, Decision, Senses, SurvivalRules
 from eidolon.biology import LifeState, SPRITE_EXTENT
-from eidolon.config import LifeConfig, MuscleConfig, PhysicsConfig, WorldConfig
+from eidolon.config import BodyConfig, LifeConfig, MuscleConfig, PhysicsConfig, WorldConfig
 from eidolon.colony import Colony, MEMBRANE_RADIUS
 from eidolon.organism import Symbiote
 from eidolon.muscles import wave_activations
@@ -20,8 +20,10 @@ class Simulation:
         life_config: LifeConfig | None = None, controller: Controller | None = None,
         physics_config: PhysicsConfig | None = None,
         muscle_config: MuscleConfig | None = None, muscle_test: str | None = None,
+        body: str = "detailed",
     ) -> None:
         self.seed = seed
+        self.body_config = BodyConfig(body)
         self.world_config = world_config if world_config is not None else WorldConfig()
         self.life_config = life_config if life_config is not None else LifeConfig()
         self.physics_config = physics_config if physics_config is not None else PhysicsConfig()
@@ -72,7 +74,8 @@ class Simulation:
             (self.seed % 65536) * 0.61803398875 % tau,
             settings.base_radius, settings.initial_energy, settings.max_energy,
         )
-        self.colony = Colony(self.seed, self.life.position, settings.base_radius, self.physics_config, self.muscle_config)
+        self.colony = Colony(self.seed, self.life.position, settings.base_radius, self.physics_config,
+                             self.muscle_config, self.body_config.kind)
         bottom = max(node.position[1] + node.radius * MEMBRANE_RADIUS for node in self.colony.nodes)
         self.colony.translate_to((self.world_config.width / 2,
                                   self.colony.center[1] + self.world_config.height - bottom - 2.0))

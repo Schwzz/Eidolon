@@ -19,7 +19,7 @@ class Application:
 
             controller = NeuralController.from_seed(self.config.seed)
         self.simulation = Simulation(self.config.seed, self.config.world, self.config.life, controller,
-                                     self.config.physics, self.config.muscles, self.config.muscle_test)
+                                     self.config.physics, self.config.muscles, self.config.muscle_test, self.config.body)
 
     def _muscle_key(self, event) -> None:
         if self.simulation.muscle_test != "manual":
@@ -54,7 +54,7 @@ class Application:
                 (self.config.width, self.config.height), pygame.RESIZABLE
             )
             pygame.display.set_caption("EIDOLON — Simulation Chamber")
-            renderer = ChamberRenderer()
+            renderer = ChamberRenderer(show_nodes=self.config.show_nodes)
             simulation_clock = FixedStepClock(self.config)
             frame_limiter = pygame.time.Clock()
             previous_time = perf_counter()

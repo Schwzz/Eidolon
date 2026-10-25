@@ -9,7 +9,7 @@ from math import ceil, cos, exp, hypot, isfinite, sin, sqrt
 from random import Random
 
 from eidolon.interaction import GrabConstraint
-from eidolon.config import MuscleConfig, PhysicsConfig
+from eidolon.config import BodyConfig, MuscleConfig, PhysicsConfig
 from eidolon.locomotion import ground_drive
 from eidolon.muscles import MuscleSystem
 from eidolon.spatial import nearby_pairs
@@ -57,14 +57,17 @@ class Colony:
     RECONNECT_DELAY = 0.45
 
     def __init__(self, seed: int, center: Point, base_radius: float,
-                 physics: PhysicsConfig | None = None, muscle_config: MuscleConfig | None = None) -> None:
+                 physics: PhysicsConfig | None = None, muscle_config: MuscleConfig | None = None,
+                 body: str = "detailed") -> None:
         if not isfinite(base_radius) or base_radius <= 0:
             raise ValueError("base_radius must be finite and positive")
+        self.body_config = BodyConfig(body)
+        simple = body == "simple"
         rng = Random(seed ^ 0xC010F1)
         self.physics = physics if physics is not None else PhysicsConfig()
-        rows = rng.choice(self.ROW_PLANS)
+        rows = (5, 5) if simple else rng.choice(self.ROW_PLANS)
         self.base_radius = base_radius
-        self.spacing = base_radius * 0.375
+        self.spacing = base_radius * (0.8 if simple else 0.375)
         self.scale = 1.0
         self.elapsed_seconds = 0.0
         self.wall_contacts = 0
@@ -81,7 +84,8 @@ class Colony:
         self.phase = rng.uniform(0, 6.283185307)
         self.nodes: list[Node] = []
         for row, count in enumerate(rows):
-            row_shift = 0.42 * sin(row * 1.2 + self.phase) + rng.uniform(-0.12, 0.12)
+            row_shift = (rng.uniform(-0.03, 0.03) if simple else
+                         0.42 * sin(row * 1.2 + self.phase) + rng.uniform(-0.12, 0.12))
             for column in range(count):
                 x = (column - (count - 1) / 2 + row_shift + rng.uniform(-0.06, 0.06)) * self.spacing
                 y = (row - (len(rows) - 1) / 2 + rng.uniform(-0.06, 0.06)) * self.spacing * 0.866
@@ -91,11 +95,19 @@ class Colony:
         for node in self.nodes:
             node.position = (node.position[0] - offset[0] + center[0], node.position[1] - offset[1] + center[1])
         self.bonds: list[Bond] = []
-        for first, second in nearby_pairs([node.position for node in self.nodes], self.spacing * 1.3):
+        if simple:
+            # Two rails, five rungs, and alternating diagonals: 10 nodes, 17 bonds.
+            pairs = ([(row * 5 + column, row * 5 + column + 1) for row in range(2) for column in range(4)]
+                     + [(column, column + 5) for column in range(5)]
+                     + [(column, column + 6) if column % 2 == 0 else (column + 1, column + 5)
+                        for column in range(4)])
+        else:
+            pairs = nearby_pairs([node.position for node in self.nodes], self.spacing * 1.3)
+        for first, second in sorted(pairs):
             a, b = self.nodes[first], self.nodes[second]
             dx, dy = b.position[0] - a.position[0], b.position[1] - a.position[1]
             distance = hypot(dx, dy)
-            if distance <= self.spacing * 1.3:
+            if simple or distance <= self.spacing * 1.3:
                 self.bonds.append(Bond(first, second, distance, 0.0015,
                                        (dx / distance, dy / distance), (a.position[0] - center[0]) / self.spacing))
         self.muscles = MuscleSystem([node.position for node in self.nodes], muscle_config)
@@ -119,6 +131,10 @@ class Colony:
     def material_center(self) -> Point:
         """Mass center of all material, including fragments, for motion measurement."""
         return self._mean(range(len(self.nodes)), "position")
+
+    @property
+    def material_velocity(self) -> Point:
+        return self._mean(range(len(self.nodes)), "velocity")
 
     def _mean(self, identifiers, field: str) -> Point:
         mass = sum(self.nodes[index].mass for index in identifiers)

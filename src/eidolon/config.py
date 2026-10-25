@@ -9,6 +9,15 @@ MIN_WINDOW_HEIGHT = 320
 
 
 @dataclass(frozen=True, slots=True)
+class BodyConfig:
+    kind: str = "detailed"
+
+    def __post_init__(self) -> None:
+        if self.kind not in ("simple", "detailed"):
+            raise ValueError("body must be 'simple' or 'detailed'")
+
+
+@dataclass(frozen=True, slots=True)
 class MuscleConfig:
     max_contraction: float = 0.28  # Fraction of a bond's relaxed length.
     contraction_rate: float = 1.5  # Activation units/second.
@@ -123,8 +132,13 @@ class AppConfig:
     physics: PhysicsConfig = field(default_factory=PhysicsConfig)
     muscles: MuscleConfig = field(default_factory=MuscleConfig)
     muscle_test: str | None = None
+    body: str = "detailed"
+    show_nodes: bool = False
 
     def __post_init__(self) -> None:
+        BodyConfig(self.body)
+        if not isinstance(self.show_nodes, bool):
+            raise ValueError("show_nodes must be a boolean")
         if self.muscle_test not in (None, "manual", "wave"):
             raise ValueError("muscle_test must be 'manual', 'wave', or None")
         if self.controller not in ("rules", "neural"):

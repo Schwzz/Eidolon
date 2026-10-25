@@ -1,9 +1,10 @@
 # EIDOLON
 
-An experimental artificial-life sandbox for Windows desktop. **Phase 2A.2:
-Artificial Muscles** adds eight controllable material regions to the grounded
-2D colony. They deform existing bonds and can move the body through floor contact
-with compatibility propulsion disabled. Biomass and food fall and settle. Survival
+An experimental artificial-life sandbox for Windows desktop. **Phase 2B.1:
+Simplified Body & Training Laboratory** adds a ten-node body and deterministic,
+headless locomotion episodes with observations, muscle actions, and rewards.
+Eight controllable material regions deform existing bonds and can move the body
+through floor contact with compatibility propulsion disabled. Survival
 rules remain the default, and the seeded NumPy neural controller is retained.
 The biomass appearance, grabbing, tearing/reconnection, energy, growth,
 starvation, fixed world, and model format remain.
@@ -12,7 +13,8 @@ There is no training, learning, memory, evolution, reproduction, or second
 organism. Neural weights are initially random; neural mode is an experiment,
 not a trained survival policy. No ML frameworks, pretrained models, LLMs, cloud
 APIs, credentials, or network connection are required after installation.
-No reaching/gripping, rewards, reinforcement learning, or training are implemented.
+The laboratory evaluates actions and rewards; it does not optimize weights or run
+reinforcement learning algorithms. Reaching/gripping is outside this phase.
 
 ## Windows setup (PowerShell)
 
@@ -40,6 +42,7 @@ same import name and should not share an environment.
 ```powershell
 .\.venv\Scripts\python.exe -m eidolon --seed 17 --max-fps 60 --width 1280 --height 720
 .\.venv\Scripts\eidolon.exe --seed 42
+.\.venv\Scripts\python.exe -m eidolon --body simple --muscle-test manual --show-nodes
 ```
 
 | Control | Action |
@@ -52,6 +55,16 @@ same import name and should not share an environment.
 | `--seed INTEGER` | Reproduce colony layout, masses, palette, food, and behavior |
 
 The default window is 1280 × 720; the minimum is 480 × 320. Ctrl+C also exits.
+The desktop retains the detailed body by default. `--body simple` selects exactly
+**10 nodes and 17 initial bonds**: two five-node rows with horizontal rails, five
+vertical links, and alternating diagonal braces. At the default radius, spacing
+is 19.2 world units. Every muscle channel affects existing bonds, including four
+upper and four lower rail segments. The same seed determines small shape/mass
+variations, and assignments stay attached to material during deformation.
+`--body detailed` retains the existing 85–98-node mesh. Both bodies share the same
+physics, growth, survival, grabbing, tearing, reconnection, and flat membrane
+renderer. `--show-nodes` adds optional small outline markers without changing
+physics. Training defaults to `simple`.
 The 60 FPS limit is configurable; `--max-fps 0` removes it and may increase CPU use.
 Grabbing uses the current fit camera, including letterboxing. Empty clicks are
 ignored. Mouse release, leaving the window, loss of focus, resizing, pause,
@@ -283,10 +296,105 @@ can rebuild multiple bonds; distant fragments have no assisted return when
 propulsion is disabled and may remain separated until physical contact is restored.
 The graph is a simplified elastic material, not an anatomical muscle model.
 
+## Headless locomotion laboratory
+
+Run these from the repository root after installation. No Pygame window opens;
+the episode modules import neither Pygame nor NumPy. These commands evaluate
+fixed patterns, without neural training or weight changes:
+
+```powershell
+.\.venv\Scripts\python.exe -m eidolon.train --body simple --seed 17 --duration 20 --pattern idle
+.\.venv\Scripts\python.exe -m eidolon.train --body simple --seed 17 --duration 20 --pattern random
+.\.venv\Scripts\python.exe -m eidolon.train --body simple --seed 17 --duration 20 --pattern scripted --target-distance 100
+.\.venv\Scripts\python.exe -m eidolon.train --body detailed --seed 17 --duration 20 --pattern scripted
+.\.venv\Scripts\python.exe -m eidolon.train --body simple --pattern random --duration 60 --episodes 3 --benchmark
+```
+
+The installed `eidolon-train` command is equivalent. Output is JSON containing
+distance (signed world X), target progress (positive toward the goal), total
+reward, actuator energy, stability, contacts/components, and completion state.
+`--benchmark` adds setup time, stepping time, ticks/second, and simulated seconds
+per wall second. Episodes use seeds `seed`, `seed+1`, …; no policy changes between
+them. Run separate patterns with the same seed/settings for comparisons. Random
+actions use a private seed and change only at action intervals. `scripted` uses
+the existing traveling contraction; it is not target-aware or a learned gait.
+
+Defaults: 120 Hz fixed ticks, 0.1-second action intervals, 20-second episodes,
+target 100 world units right, and three seconds of passive settling before scoring.
+`--hz`, `--action-interval`, `--duration`, `--settle-seconds`, `--gravity`, and
+`--floor-friction` configure experiments. Durations/intervals must contain whole
+fixed ticks; the final action is shortened to the episode end. Negative
+`--target-distance` selects a leftward goal. Targets must stay inside conservative
+side-wall clearance. Settling drift/energy is excluded from episode measurements.
+
+`training.LocomotionEnvironment` owns the existing `Colony` directly. Propulsion,
+fragment homing, automatic gait, and steering are disabled. It runs no survival,
+food, metabolism, starvation, or growth systems. Actuation has unlimited experimental
+fuel, with real muscle costs accumulated separately and penalized. Normal desktop
+biology still limits muscle use by energy and can starve. Colony positions are
+set only at reset; subsequent motion comes from muscle constraints and contacts.
+
+```python
+from eidolon.training import EpisodeConfig, LocomotionEnvironment
+
+env = LocomotionEnvironment(EpisodeConfig(body="simple", seed=17, duration=20))
+observation = env.reset()  # Repeats the same settled body, muscles, and clock.
+while not env.done:
+    result = env.step([0.8, 0.4, 0, 0, 0, 0, 0.4, 0.8])
+    observation = result.observation
+    # result.reward, result.terminated, result.truncated, result.info
+metrics = env.metrics()
+```
+
+Actions are eight finite values in [0, 1]. Invalid actions fail before advancing
+time or physics. Thirty normalized observations have this stable order:
+
+| Indices | Values | Normalization |
+| --- | --- | --- |
+| 0–1 | All-material center X/Y | World coordinate → [−1, 1] |
+| 2–3 | All-material velocity X/Y | Divide by velocity cap, clip to [−1, 1] |
+| 4 | Remaining target X offset | Divide by absolute target distance, clip to [−1, 1] |
+| 5 | Ground contact | Supporting nodes / node count |
+| 6–7 | Width/height deformation | Relative change from settled extent, clip to [−1, 1] |
+| 8–9 | Mean signed / maximum absolute bond strain | Relative to relaxed length, clipped |
+| 10–11 | Fragmentation / time remaining | [0, 1] |
+| 12–19 | Actual muscle activations | [0, 1] |
+| 20–27 | Requested muscle actions | [0, 1] |
+| 28–29 | Latest-interval / total muscle energy | Divide by theoretical rate bound × interval/duration |
+
+`OBSERVATION_NAMES` provides the names. This 30-value laboratory interface is
+separate from the existing 12→16→2 steering network and version-1 JSON models.
+
+For target direction `s`, settled starting mass center `x0`, and target magnitude
+`D`, define `p = clip(s * (xCOM - x0), -D, D)`. Each stable physics tick earns:
+
+```text
+reward = (p_now - p_before) / D
+         - 0.02 * muscle_energy_used
+         - 0.01 * dt if forward progress <= 0.001 * dt
+         - 0.10 * dt * (component_count - 1)
+         + 5.0 on the first cohesive target crossing
+```
+
+Progress differences telescope, so cycling backward and forward cannot accumulate
+positive progress reward. Measurement includes every fragment's mass, avoiding
+centroid jumps when the largest component changes. Reaching the target terminates
+the episode once; duration expiry truncates it. A numerical/boundary/conservation
+fault gives **−5 for the failing tick**, earns no tick progress/bonus, and terminates.
+Side-wall contact is excluded as a locomotion anchor. Invalid state returns the
+last finite observation. `RewardConfig` exposes penalty/bonus coefficients.
+
+This is an experimental reward design, not an exploitation-proof or calibrated
+task. Locomotion is slow and seed/pattern-dependent; fixed demonstrations can have
+negative reward or move away from the target. Distant fragments lack assisted
+recovery with propulsion disabled. Training episodes have no mouse input, while
+the normal application retains grabbing and recovery. No optimizer, replay buffer,
+reward training algorithm, extra organism, or graphical dashboard is included.
+
 ## Living biomass physics
 
 `colony.py` owns particle positions/velocities/masses/radii, stable node IDs,
-adjacency, local triangles, and a separate list of elastic bonds. A seeded,
+adjacency, local triangles, and a separate list of elastic bonds. In detailed mode, a seeded,
 lopsided staggered mesh supplies 85–98 nodes and roughly 220–255 local bonds.
 At the default size, core node radii are **3.3–3.7 world units**, previously about
 8; neighboring centers are 9 units apart. The overall body remains a similar size.
@@ -456,10 +564,12 @@ light stamps are reused, and HUD label caching remains bounded.
 .\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --interaction --scale 1.6
 .\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --no-propulsion
 .\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --muscle-test wave
+.\.venv\Scripts\python.exe tools\benchmark_rendering.py --frames 600 --body simple --muscle-test wave
 .\.venv\Scripts\python.exe tools\benchmark_muscles.py --seed 17
 .\.venv\Scripts\python.exe tools\benchmark_muscles.py --seed 17 --floor-friction 0
 .\.venv\Scripts\python.exe tools\stress_colony.py --seed 17 --cycles 6 --scale 1.6
 .\.venv\Scripts\python.exe tools\stress_colony.py --seed 17 --cycles 6 --scale 1.6 --muscles
+.\.venv\Scripts\python.exe tools\stress_colony.py --body simple --seed 17 --cycles 6 --muscles
 ```
 
 The benchmark measures uncapped physics/update/draw/presentation and reports node
@@ -478,44 +588,45 @@ post-settling displacement and passive-baseline-adjusted displacement, checking
 conservation, bounded motion, and complete relaxation. With friction zero and no
 side-wall contact, internal contractions should not move the horizontal mass center.
 
-Phase 2A.2 validation: **382 tests passed on Python 3.12 and 3.14**.
-The unchanged 12→16→2 network averaged **9.66 µs per forward pass** and
-**14.69 µs per complete decision**, including normalization and validation,
-over 20,000 iterations.
+Phase 2B.1 validation: **442 tests passed on both Python 3.12 and 3.14**.
 Linux / Python 3.14.8 / NumPy 2.5.4 / SDL dummy measurements at 1280 × 720
 (600 measured frames after 60 warmup frames per run):
 
-| Controller | World seed | Scenario | Mean ms/frame | p95 ms/frame | Max ms/frame |
+| Body | World seed | Scenario | Mean ms/frame | p95 ms/frame | Max ms/frame |
 | --- | --- | --- | --- | --- | --- |
-| Rules | 17 | Compatibility baseline | 6.370 | 7.176 | 10.761 |
-| Neural | 17 | Compatibility baseline | 6.329 | 6.745 | 10.011 |
-| Muscles | 17 | Wave, propulsion disabled | 6.502 | 7.157 | 11.381 |
-| Muscles | 42 | Wave, propulsion disabled | 5.481 | 6.108 | 8.675 |
-| Muscles | 17 | Wave, 1.6× growth, propulsion disabled | 6.814 | 7.716 | 25.723 |
-| Muscles | 17 | Wave + pulling, 1.6× growth, propulsion disabled | 7.251 | 8.570 | 14.894 |
+| Simple | 17 | Rules compatibility baseline | 1.797 | 2.282 | 4.519 |
+| Simple | 17 | Neural compatibility baseline | 1.606 | 2.029 | 3.024 |
+| Simple | 17 | Wave, propulsion disabled | 1.460 | 1.960 | 3.047 |
+| Simple | 17 | Wave + pulling, 1.6× growth, propulsion disabled | 2.038 | 2.294 | 6.611 |
+| Detailed | 17 | Wave, propulsion disabled | 6.465 | 6.894 | 11.062 |
 
 These are cloud measurements, not native Windows or Iris Xe verification.
-Average/p95 timings are below the 16.67 ms frame budget, but isolated cloud
-spikes reached 25.7 ms; native 60 FPS responsiveness still needs Windows testing.
-Muscle-enabled grounded stress checks completed **12 recovery cycles over 246
-simulation seconds** across two seeds, including 1.6× growth, without lost nodes or
+The samples fit the 16.67 ms frame budget; native 60 FPS responsiveness still needs
+Windows testing. Muscle-enabled stress checks completed **18 pull/recovery cycles
+over 369 simulation seconds** across both topologies, including 1.6× growth, without lost nodes or
 force/velocity/boundary/neighbor-limit violations. Node identity, mass, and bond
-accounting remained intact. A separate 55-second muscle-only episode and its
-passive control also stayed bounded and retained all 85 nodes/bonds.
+accounting remained intact. Six additional 120-second random-action episodes
+(720 simulated seconds, seeds 0/17/42 in both bodies) remained stable, reached
+their time limits, and spent 131–134 muscle energy each without starvation.
 
-Headless muscle displacement, with food/metabolism/travel costs disabled and no
-propulsion (3 seconds settling, 16 seconds wave, 4 seconds relaxation):
+Headless laboratory episodes, seed 17, 120 Hz, 0.1-second actions, 20 seconds,
+target 100 units right, after three seconds settling; propulsion disabled:
 
-| Seed | Friction | Active dx after settling | Passive drift | Baseline-adjusted dx | Muscle energy |
+| Body | Pattern | Distance | Reward | Muscle energy | Physics ticks/s |
 | --- | --- | --- | --- | --- | --- |
-| 17 | 0.55 | −5.731 | +0.249 | −5.980 | 9.601 |
-| 42 | 0.55 | −4.493 | +0.029 | −4.522 | 9.601 |
-| 17 | 0 | Approximately 0 | Approximately 0 | Approximately 0 | 9.601 |
+| Simple | Idle | −0.005 | −0.199 | 0 | 4983 |
+| Simple | Random | −19.615 | −0.747 | 21.596 | 4706 |
+| Simple | Scripted | +9.560 | −0.230 | 11.875 | 4828 |
+| Detailed | Idle | +0.249 | −0.064 | 0 | 424 |
+| Detailed | Random | −7.240 | −0.620 | 21.704 | 408 |
+| Detailed | Scripted | −9.144 | −0.463 | 11.878 | 407 |
 
 Displacement is in world units; negative means left. Frictionless horizontal
 mass-center drift stayed below 1e−7 units. Airborne zero-gravity tests also retain
 the mass center despite contractions. These checks exclude drive/teleport helpers
 and demonstrate contact-driven movement, not a trained, fast, or directional gait.
+Throughput includes stepping, validation, observations, and reward accounting,
+excluding reset/settling. These rates are cloud CPU measurements.
 
 Tests cover seeded connected graphs, force propagation, stretch/recovery,
 self-collision, walls, timestep subdivision, growth, deterministic trajectories,
@@ -546,6 +657,13 @@ traction-dependent displacement, nearby-fragment repair, conservation, unchanged
 neural parameters, fixed-step/reset replay, manual key release, pause/resize,
 and HUD render purity at three sizes. Manual and wave modes also passed an SDL
 dummy lifecycle check with pause, resize, restart, and clean exit.
+Laboratory checks add exact ten-node connectivity, all eight channels' physical
+contraction/recovery, both body modes, 30 observations/eight actions, deterministic
+pattern/reset replay, fixed action intervals, exact duration truncation, signed
+reward/cycle cancellation, one-time target bonuses, fuel-independent long episodes,
+fragment-safe centroids, physics-fault penalties, and a JSON CLI subprocess with
+Pygame and NumPy imports blocked. Desktop SDL checks include both controllers and
+manual muscles with the simple body, grabbing, resizing while paused, reset, and exit.
 
 GitHub Actions covers Python 3.11–3.14 on Linux/Windows. Configuring CI does not
 establish that it has run. Native Windows graphical compatibility and Iris Xe
@@ -569,6 +687,8 @@ src/eidolon/
   spatial.py           Deterministic local neighbor grid
   locomotion.py        Switchable, floor-only compatibility propulsion
   muscles.py           Eight material regions, bounded activations, energy, test pattern
+  training.py          Fixed-action headless episodes, observations, signed rewards
+  train.py             JSON experiment CLI and throughput measurements; no optimizer
   colony_rendering.py  Flat membrane from physical node positions
   biology.py           Colony-wide biological state
   behavior.py          Replaceable sensory/decision interface and survival rules
@@ -596,4 +716,4 @@ python3 -m venv .venv
 This is a simplified 2D elastic graph, not a continuum fluid or a biological
 material model. Recovery can be interrupted by death; dead tissue settles
 passively rather than continuing to reconnect. Learning and evolution remain
-outside this milestone. **Phase 2B has not been started.**
+outside this milestone. **Phase 2B.2 has not been started.**

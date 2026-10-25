@@ -12,11 +12,11 @@ from eidolon.muscles import wave_activations
 from eidolon.simulation import Simulation
 
 
-def episode(seed: int, friction: float, cycles: int, driven: bool) -> dict:
+def episode(seed: int, friction: float, cycles: int, driven: bool, body: str = "detailed") -> dict:
     simulation = Simulation(seed, WorldConfig(initial_food=0, regeneration_interval=0),
                             LifeConfig(metabolism=0, movement_cost=0),
                             physics_config=PhysicsConfig(propulsion_enabled=False, floor_friction=friction),
-                            muscle_test="manual")
+                            muscle_test="manual", body=body)
     colony = simulation.colony
     identities = tuple(id(node) for node in colony.nodes)
     original_mass = sum(node.mass for node in colony.nodes)
@@ -55,14 +55,15 @@ def episode(seed: int, friction: float, cycles: int, driven: bool) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, default=17)
+    parser.add_argument("--body", choices=("simple", "detailed"), default="detailed")
     parser.add_argument("--cycles", type=int, default=4)
     parser.add_argument("--floor-friction", type=float, default=0.55)
     args = parser.parse_args()
     if args.cycles <= 0 or not isfinite(args.floor_friction) or args.floor_friction < 0:
         parser.error("cycles must be positive and floor friction finite and nonnegative")
-    active = episode(args.seed, args.floor_friction, args.cycles, True)
-    passive = episode(args.seed, args.floor_friction, args.cycles, False)
-    print(json.dumps(dict(python=platform.python_version(), platform=platform.system(), seed=args.seed,
+    active = episode(args.seed, args.floor_friction, args.cycles, True, args.body)
+    passive = episode(args.seed, args.floor_friction, args.cycles, False, args.body)
+    print(json.dumps(dict(python=platform.python_version(), platform=platform.system(), seed=args.seed, body=args.body,
                           floor_friction=args.floor_friction, propulsion_enabled=False,
                           settle_seconds=3, wave_seconds=args.cycles * 4, relaxation_seconds=4,
                           active=active, passive=passive,

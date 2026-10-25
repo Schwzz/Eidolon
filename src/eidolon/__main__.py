@@ -16,6 +16,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--width", type=int, default=defaults.width, help="window width")
     parser.add_argument("--height", type=int, default=defaults.height, help="window height")
     parser.add_argument("--seed", type=int, default=defaults.seed, help="world and appearance seed (default: 17)")
+    parser.add_argument("--body", choices=("simple", "detailed"), default=defaults.body,
+                        help="physics topology (desktop default: detailed; training default: simple)")
+    parser.add_argument("--show-nodes", action="store_true", help="overlay subtle physics-node markers")
     parser.add_argument("--controller", choices=("rules", "neural"), default=defaults.controller,
                         help="decision controller (default: rules)")
     parser.add_argument("--network-seed", type=int, help="neural initialization seed (default: world seed)")
@@ -44,6 +47,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = AppConfig(width=args.width, height=args.height, max_fps=args.max_fps,
                            seed=args.seed, controller=args.controller,
                            muscle_test=args.muscle_test,
+                           body=args.body, show_nodes=args.show_nodes,
                            physics=PhysicsConfig(gravity=args.gravity, floor_friction=args.floor_friction,
                                                  propulsion_enabled=not (args.no_propulsion or args.muscle_test)))
         controller = None
